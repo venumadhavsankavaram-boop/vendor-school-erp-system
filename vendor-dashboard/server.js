@@ -250,7 +250,66 @@ app.post('/api/logout', async (req, res) => {
 
 app.get('/api/me', async (req, res) => {
   if (!req.authAdmin) return res.status(401).json({ error: 'Not logged in.' });
-  return res.status(200).json(req.authAdmin);
+  try {
+    const rows = await sql`SELECT id, name, username FROM vendor_admins WHERE id = ${req.authAdmin.id}`;
+    if (!rows.length) return res.status(401).json({ error: 'Not logged in.' });
+    return res.status(200).json(rows[0]);
+  } catch (err) {
+    console.error('me error:', err);
+    return res.status(500).json({ error: 'Something went wrong on the server.' });
+  }
+});
+
+// Update the signed-in admin's own display name / username.
+app.put('/api/account/profile', async (req, res) => {
+  if (!req.authAdmin) return res.status(401).json({ error: 'Not logged in.' });
+  try {
+    const { name, username } = req.body || {};
+    if (!username || !String(username).trim()) return res.status(400).json({ error: 'Username is required.' });
+    const cleanUsername = String(username).trim();
+    const clash = await sql`
+      SELECT id FROM vendor_admins WHERE LOWER(username) = LOWER(${cleanUsername}) AND id != ${req.authAdmin.id}
+    `;
+    if (clash.length) return res.status(409).json({ error: 'That username is already taken.' });
+    await sql`
+      UPDATE vendor_admins SET name = ${name != null ? String(name).trim() : null}, username = ${cleanUsername}
+      WHERE id = ${req.authAdmin.id}
+    `;
+    // Keep the active session's display name in sync so it shows up immediately.
+    const cookies = parseCookies(req);
+    if (cookies.vsid) {
+      await sql`UPDATE vendor_sessions SET name = ${name != null ? String(name).trim() : null} WHERE id = ${hashSessionToken(cookies.vsid)}`.catch(() => {});
+    }
+    const rows = await sql`SELECT id, name, username FROM vendor_admins WHERE id = ${req.authAdmin.id}`;
+    return res.status(200).json(rows[0]);
+  } catch (err) {
+    console.error('update profile error:', err);
+    return res.status(500).json({ error: 'Something went wrong on the server.' });
+  }
+});
+
+// Change the signed-in admin's own password. Requires the current password,
+// same as any self-service "change my password" screen should (see the
+// comment near the ERP's own login route for why this differs from an
+// admin resetting someone else's password outright).
+app.post('/api/account/change-password', async (req, res) => {
+  if (!req.authAdmin) return res.status(401).json({ error: 'Not logged in.' });
+  try {
+    const { currentPassword, newPassword } = req.body || {};
+    if (!currentPassword || !newPassword) return res.status(400).json({ error: 'Current and new password are required.' });
+    if (String(newPassword).length < 8) return res.status(400).json({ error: 'New password must be at least 8 characters.' });
+    const rows = await sql`SELECT * FROM vendor_admins WHERE id = ${req.authAdmin.id}`;
+    if (!rows.length) return res.status(401).json({ error: 'Not logged in.' });
+    const admin = rows[0];
+    const ok = await bcrypt.compare(String(currentPassword), admin.password || '');
+    if (!ok) return res.status(401).json({ error: 'Current password is incorrect.' });
+    const hash = await bcrypt.hash(String(newPassword), 10);
+    await sql`UPDATE vendor_admins SET password = ${hash} WHERE id = ${req.authAdmin.id}`;
+    return res.status(200).json({ ok: true });
+  } catch (err) {
+    console.error('change password error:', err);
+    return res.status(500).json({ error: 'Something went wrong on the server.' });
+  }
 });
 
 // ---------- Schools registry ----------
