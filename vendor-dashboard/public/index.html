@@ -1,0 +1,566 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Vendor-School-ERP System</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800&family=IBM+Plex+Mono:wght@500&display=swap" rel="stylesheet">
+<style>
+  :root{
+    --navy:#161A3A; --navy-soft:#232A5C; --ink:#1A1D33; --ink-soft:#666B8A; --border:#E4E3F0;
+    --bg:#F5F5FB; --panel:#FFFFFF; --accent:#4F5BD5; --good:#1B9C6E; --warn:#C98B12; --bad:#D1305A;
+    --shadow:0 10px 30px -16px rgba(22,20,58,0.22);
+  }
+  *{box-sizing:border-box;}
+  body{margin:0; font-family:'Inter',sans-serif; background:var(--bg); color:var(--ink);}
+  code, .mono{font-family:'IBM Plex Mono',monospace;}
+
+  /* ---------- Login ---------- */
+  #loginOverlay{
+    position:fixed; inset:0; background:linear-gradient(160deg,var(--navy),#2B2F6B); display:flex;
+    align-items:center; justify-content:center; z-index:1000;
+  }
+  .login-card{
+    background:#fff; border-radius:18px; padding:38px 34px; width:min(380px, 90vw); box-shadow:var(--shadow);
+  }
+  .login-card h1{font-size:1.25rem; margin:0 0 4px; color:var(--navy);}
+  .login-card .sub{font-size:0.82rem; color:var(--ink-soft); margin-bottom:24px;}
+  .login-card label{display:block; font-size:0.78rem; font-weight:600; margin-bottom:6px; color:var(--navy);}
+  .login-card input{
+    width:100%; padding:10px 12px; border:1.5px solid var(--border); border-radius:9px; font-size:0.9rem;
+    margin-bottom:16px; font-family:inherit;
+  }
+  .login-card input:focus{outline:none; border-color:var(--accent);}
+  .login-card button{
+    width:100%; padding:11px; border:none; border-radius:9px; background:var(--accent); color:#fff;
+    font-weight:700; font-size:0.9rem; cursor:pointer;
+  }
+  .login-card button:hover{opacity:0.9;}
+  #loginError{color:var(--bad); font-size:0.82rem; margin-top:12px; display:none;}
+
+  /* ---------- Shell ---------- */
+  #appShell{display:none;}
+  header.top{
+    background:var(--navy); color:#fff; padding:14px 26px; display:flex; align-items:center;
+    justify-content:space-between; position:sticky; top:0; z-index:50;
+  }
+  header.top h1{font-size:1.05rem; margin:0;}
+  header.top .sub{font-size:0.75rem; color:#B7B9E0;}
+  .hdr-right{display:flex; align-items:center; gap:14px;}
+  .hdr-right .who{font-size:0.82rem; color:#D9DAF3;}
+  .btn{
+    font-family:inherit; cursor:pointer; border:none; border-radius:8px; padding:9px 15px; font-size:0.83rem;
+    font-weight:600;
+  }
+  .btn-accent{background:var(--accent); color:#fff;}
+  .btn-ghost{background:rgba(255,255,255,0.12); color:#fff;}
+  .btn-light{background:#fff; color:var(--navy); border:1px solid var(--border);}
+  .btn-danger{background:#FCE4EA; color:var(--bad);}
+  .btn-sm{padding:6px 10px; font-size:0.76rem; border-radius:6px;}
+  .btn:hover{opacity:0.9;}
+
+  main{max-width:1180px; margin:0 auto; padding:26px 24px 60px;}
+
+  .cards{display:grid; grid-template-columns:repeat(5, 1fr); gap:16px; margin-bottom:26px;}
+  @media (max-width:900px){ .cards{grid-template-columns:repeat(2, 1fr);} }
+  .card{
+    background:var(--panel); border:1px solid var(--border); border-radius:14px; padding:18px 20px;
+    box-shadow:var(--shadow);
+  }
+  .card .num{font-size:1.7rem; font-weight:800; color:var(--navy); line-height:1;}
+  .card .label{font-size:0.75rem; color:var(--ink-soft); margin-top:6px; font-weight:600; text-transform:uppercase; letter-spacing:0.03em;}
+  .card.accent-good .num{color:var(--good);}
+  .card.accent-bad .num{color:var(--bad);}
+
+  .panel{
+    background:var(--panel); border:1px solid var(--border); border-radius:14px; box-shadow:var(--shadow);
+    overflow:hidden;
+  }
+  .panel-head{padding:18px 22px; display:flex; align-items:center; justify-content:space-between; border-bottom:1px solid var(--border);}
+  .panel-head h2{font-size:1rem; margin:0; color:var(--navy);}
+
+  table{width:100%; border-collapse:collapse;}
+  th, td{text-align:left; padding:13px 18px; font-size:0.85rem; border-bottom:1px solid var(--border);}
+  th{font-size:0.72rem; text-transform:uppercase; letter-spacing:0.04em; color:var(--ink-soft); font-weight:700; background:#FAFAFE;}
+  tr:last-child td{border-bottom:none;}
+  tr:hover td{background:#FAFAFE;}
+  .school-name{font-weight:700; color:var(--navy);}
+  .school-notes{font-size:0.76rem; color:var(--ink-soft); margin-top:2px;}
+
+  .badge{display:inline-flex; align-items:center; gap:5px; padding:3px 10px; border-radius:20px; font-size:0.74rem; font-weight:700;}
+  .badge-permanent{background:#E4F7EE; color:var(--good);}
+  .badge-temporary{background:#FFF3DE; color:var(--warn);}
+
+  .dot{width:8px; height:8px; border-radius:50%; display:inline-block;}
+  .dot-online{background:var(--good);}
+  .dot-idle{background:var(--warn);}
+  .dot-offline{background:var(--bad);}
+  .dot-never{background:#B8BAD6;}
+  .health-label{display:inline-flex; align-items:center; gap:7px; font-size:0.82rem;}
+
+  .err-count{font-weight:700;}
+  .err-count.has-errors{color:var(--bad);}
+
+  .row-actions{display:flex; gap:6px; flex-wrap:wrap;}
+
+  .empty-state{padding:50px 20px; text-align:center; color:var(--ink-soft);}
+
+  /* ---------- Modal ---------- */
+  .modal-overlay{
+    position:fixed; inset:0; background:rgba(20,18,50,0.45); display:none; align-items:flex-start;
+    justify-content:center; z-index:200; padding:40px 20px; overflow-y:auto;
+  }
+  .modal-overlay.open{display:flex;}
+  .modal{
+    background:#fff; border-radius:16px; width:min(560px, 100%); box-shadow:var(--shadow); padding:26px 28px;
+  }
+  .modal h3{margin:0 0 4px; font-size:1.05rem; color:var(--navy);}
+  .modal .modal-sub{font-size:0.8rem; color:var(--ink-soft); margin-bottom:20px;}
+  .field{margin-bottom:14px;}
+  .field label{display:block; font-size:0.78rem; font-weight:600; margin-bottom:5px; color:var(--navy);}
+  .field input, .field select, .field textarea{
+    width:100%; padding:9px 11px; border:1.5px solid var(--border); border-radius:8px; font-size:0.85rem;
+    font-family:inherit;
+  }
+  .field textarea{min-height:60px; resize:vertical;}
+  .field input:focus, .field select:focus, .field textarea:focus{outline:none; border-color:var(--accent);}
+  .grid-2{display:grid; grid-template-columns:1fr 1fr; gap:12px;}
+  .modal-actions{display:flex; justify-content:space-between; align-items:center; margin-top:20px; gap:10px; flex-wrap:wrap;}
+  .modal-actions .right{display:flex; gap:8px;}
+  .apikey-row{
+    display:flex; align-items:center; gap:8px; background:#F5F5FB; border:1px solid var(--border); border-radius:8px;
+    padding:9px 11px; font-size:0.78rem;
+  }
+  .apikey-row code{flex:1; overflow-x:auto; white-space:nowrap;}
+  .modal-error{color:var(--bad); font-size:0.82rem; margin-top:6px; display:none;}
+
+  /* Error log modal */
+  .error-item{border:1px solid var(--border); border-radius:10px; padding:12px 14px; margin-bottom:10px; background:#FAFAFE;}
+  .error-item .err-when{font-size:0.72rem; color:var(--ink-soft); margin-bottom:4px;}
+  .error-item .err-msg{font-size:0.85rem; font-weight:600; color:var(--bad); margin-bottom:6px;}
+  .error-item details{font-size:0.76rem; color:var(--ink-soft);}
+  .error-item pre{white-space:pre-wrap; word-break:break-word; margin:6px 0 0; font-size:0.72rem;}
+
+  .toast{
+    position:fixed; bottom:20px; left:50%; transform:translateX(-50%); background:var(--navy); color:#fff;
+    padding:10px 18px; border-radius:8px; font-size:0.84rem; box-shadow:var(--shadow); opacity:0; pointer-events:none;
+    transition:opacity 0.2s; z-index:400;
+  }
+  .toast.show{opacity:1;}
+</style>
+</head>
+<body>
+
+<div id="loginOverlay">
+  <div class="login-card">
+    <h1>Vendor-School-ERP System</h1>
+    <div class="sub">Sign in to manage onboarded schools.</div>
+    <form id="loginForm">
+      <label for="loginUsername">Username</label>
+      <input type="text" id="loginUsername" autocomplete="username" required>
+      <label for="loginPassword">Password</label>
+      <input type="password" id="loginPassword" autocomplete="current-password" required>
+      <button type="submit">Sign In</button>
+      <div id="loginError"></div>
+    </form>
+  </div>
+</div>
+
+<div id="appShell">
+  <header class="top">
+    <div>
+      <h1>Vendor-School-ERP System</h1>
+      <div class="sub">Fleet overview for every school you've onboarded</div>
+    </div>
+    <div class="hdr-right">
+      <span class="who" id="whoAmI"></span>
+      <button class="btn btn-ghost" id="btnLogout">Log out</button>
+    </div>
+  </header>
+
+  <main>
+    <div class="cards" id="summaryCards"></div>
+
+    <div class="panel">
+      <div class="panel-head">
+        <h2>Schools</h2>
+        <button class="btn btn-accent" id="btnAddSchool">+ Add School</button>
+      </div>
+      <div id="schoolsTableWrap"></div>
+    </div>
+  </main>
+</div>
+
+<!-- Add / Edit School Modal -->
+<div class="modal-overlay" id="schoolModalOverlay">
+  <div class="modal">
+    <h3 id="schoolModalTitle">Add School</h3>
+    <div class="modal-sub">This creates an entry in your fleet registry and issues an API key that school's server can use to report its status here.</div>
+    <form id="schoolForm">
+      <div class="field">
+        <label for="fSchoolName">School Name</label>
+        <input type="text" id="fSchoolName" required>
+      </div>
+      <div class="grid-2">
+        <div class="field">
+          <label for="fErpUrl">ERP URL</label>
+          <input type="url" id="fErpUrl" placeholder="https://school-erp.onrender.com">
+        </div>
+        <div class="field">
+          <label for="fWebsiteUrl">Website URL</label>
+          <input type="url" id="fWebsiteUrl" placeholder="https://school-website.onrender.com">
+        </div>
+      </div>
+      <div class="grid-2">
+        <div class="field">
+          <label for="fStatus">Deployment Status</label>
+          <select id="fStatus">
+            <option value="temporary">Temporary / Trial</option>
+            <option value="permanent">Permanent</option>
+          </select>
+        </div>
+        <div class="field">
+          <label for="fOnboardedDate">Onboarded Date</label>
+          <input type="date" id="fOnboardedDate">
+        </div>
+      </div>
+      <div class="field">
+        <label for="fNotes">Notes</label>
+        <textarea id="fNotes" placeholder="Contact person, plan, anything worth remembering..."></textarea>
+      </div>
+      <div class="field" id="apiKeyField" style="display:none;">
+        <label>API Key (for this school's reporting client — see README.md)</label>
+        <div class="apikey-row">
+          <code id="fApiKey"></code>
+          <button type="button" class="btn btn-light btn-sm" id="btnCopyKey">Copy</button>
+          <button type="button" class="btn btn-light btn-sm" id="btnRegenKey">Regenerate</button>
+        </div>
+      </div>
+      <div class="modal-error" id="schoolModalError"></div>
+      <div class="modal-actions">
+        <div>
+          <button type="button" class="btn btn-danger" id="btnDeleteSchool" style="display:none;">Delete School</button>
+        </div>
+        <div class="right">
+          <button type="button" class="btn btn-light" id="btnCancelSchool">Cancel</button>
+          <button type="submit" class="btn btn-accent" id="btnSaveSchool">Save</button>
+        </div>
+      </div>
+    </form>
+  </div>
+</div>
+
+<!-- Error Log Modal -->
+<div class="modal-overlay" id="errorModalOverlay">
+  <div class="modal" style="width:min(640px, 100%);">
+    <h3 id="errorModalTitle">Recent Errors</h3>
+    <div class="modal-sub">Last 24 hours of error reports from this school's server.</div>
+    <div id="errorList"></div>
+    <div class="modal-actions">
+      <div></div>
+      <div class="right"><button type="button" class="btn btn-light" id="btnCloseErrors">Close</button></div>
+    </div>
+  </div>
+</div>
+
+<div class="toast" id="toast"></div>
+
+<script>
+const $ = sel => document.querySelector(sel);
+const $$ = sel => Array.from(document.querySelectorAll(sel));
+
+async function api(path, opts = {}) {
+  const res = await fetch(path, {
+    method: opts.method || 'GET',
+    headers: { 'Content-Type': 'application/json' },
+    body: opts.body ? JSON.stringify(opts.body) : undefined,
+  });
+  let data = null;
+  try { data = await res.json(); } catch (e) {}
+  if (!res.ok) throw new Error((data && data.error) || ('Request failed (' + res.status + ')'));
+  return data;
+}
+
+let toastTimer = null;
+function showToast(msg) {
+  const t = $('#toast');
+  t.textContent = msg;
+  t.classList.add('show');
+  clearTimeout(toastTimer);
+  toastTimer = setTimeout(() => t.classList.remove('show'), 2400);
+}
+
+function esc(s) {
+  return String(s == null ? '' : s).replace(/[&<>"']/g, m => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[m]));
+}
+
+function relativeTime(iso) {
+  if (!iso) return 'never';
+  const diffMs = Date.now() - new Date(iso).getTime();
+  const mins = Math.floor(diffMs / 60000);
+  if (mins < 1) return 'just now';
+  if (mins < 60) return mins + 'm ago';
+  const hrs = Math.floor(mins / 60);
+  if (hrs < 24) return hrs + 'h ago';
+  const days = Math.floor(hrs / 24);
+  return days + 'd ago';
+}
+
+/* ---------- Auth ---------- */
+async function initAuth() {
+  try {
+    await api('/api/me');
+    showApp();
+  } catch (e) {
+    showLogin();
+  }
+}
+function showLogin() {
+  $('#loginOverlay').style.display = 'flex';
+  $('#appShell').style.display = 'none';
+}
+function showApp() {
+  $('#loginOverlay').style.display = 'none';
+  $('#appShell').style.display = 'block';
+  loadAll();
+}
+
+$('#loginForm').addEventListener('submit', async (e) => {
+  e.preventDefault();
+  const errEl = $('#loginError');
+  errEl.style.display = 'none';
+  try {
+    const me = await api('/api/login', {
+      method: 'POST',
+      body: { username: $('#loginUsername').value, password: $('#loginPassword').value },
+    });
+    $('#whoAmI').textContent = me.name || me.username;
+    showApp();
+  } catch (err) {
+    errEl.textContent = err.message;
+    errEl.style.display = 'block';
+  }
+});
+
+$('#btnLogout').addEventListener('click', async () => {
+  await api('/api/logout', { method: 'POST' }).catch(() => {});
+  showLogin();
+});
+
+/* ---------- Dashboard data ---------- */
+let schoolsCache = [];
+
+async function loadAll() {
+  const [me, summary, schools] = await Promise.all([
+    api('/api/me'), api('/api/summary'), api('/api/schools'),
+  ]);
+  $('#whoAmI').textContent = 'Signed in as ' + (me.name || me.username);
+  schoolsCache = schools;
+  renderSummary(summary);
+  renderSchoolsTable(schools);
+}
+
+function renderSummary(s) {
+  const cards = [
+    { label: 'Total Schools', value: s.total, cls: '' },
+    { label: 'Permanent', value: s.permanent, cls: 'accent-good' },
+    { label: 'Temporary / Trial', value: s.temporary, cls: '' },
+    { label: 'Online Now', value: s.online, cls: 'accent-good' },
+    { label: 'Errors (24h)', value: s.errors24h, cls: s.errors24h > 0 ? 'accent-bad' : '' },
+  ];
+  $('#summaryCards').innerHTML = cards.map(c => `
+    <div class="card ${c.cls}">
+      <div class="num">${c.value}</div>
+      <div class="label">${c.label}</div>
+    </div>
+  `).join('');
+}
+
+function renderSchoolsTable(schools) {
+  const wrap = $('#schoolsTableWrap');
+  if (!schools.length) {
+    wrap.innerHTML = '<div class="empty-state">No schools onboarded yet. Click "+ Add School" to add your first one.</div>';
+    return;
+  }
+  wrap.innerHTML = `
+    <table>
+      <thead>
+        <tr>
+          <th>School</th>
+          <th>Status</th>
+          <th>Health</th>
+          <th>Last Heartbeat</th>
+          <th>Errors (24h)</th>
+          <th>Actions</th>
+        </tr>
+      </thead>
+      <tbody>
+        ${schools.map(s => `
+          <tr>
+            <td>
+              <div class="school-name">${esc(s.name)}</div>
+              ${s.notes ? `<div class="school-notes">${esc(s.notes)}</div>` : ''}
+            </td>
+            <td><span class="badge badge-${s.status}">${s.status === 'permanent' ? 'Permanent' : 'Temporary'}</span></td>
+            <td>
+              <span class="health-label"><span class="dot dot-${s.health}"></span>${s.health.charAt(0).toUpperCase() + s.health.slice(1)}</span>
+            </td>
+            <td>${relativeTime(s.lastHeartbeatAt)}</td>
+            <td><span class="err-count ${s.errorCount24h > 0 ? 'has-errors' : ''}">${s.errorCount24h}</span></td>
+            <td>
+              <div class="row-actions">
+                <button class="btn btn-light btn-sm" data-action="edit" data-id="${s.id}">Edit</button>
+                <button class="btn btn-light btn-sm" data-action="errors" data-id="${s.id}">Errors</button>
+              </div>
+            </td>
+          </tr>
+        `).join('')}
+      </tbody>
+    </table>
+  `;
+  wrap.querySelectorAll('[data-action="edit"]').forEach(btn => {
+    btn.addEventListener('click', () => openEditModal(btn.dataset.id));
+  });
+  wrap.querySelectorAll('[data-action="errors"]').forEach(btn => {
+    btn.addEventListener('click', () => openErrorsModal(btn.dataset.id));
+  });
+}
+
+/* ---------- Add / Edit school modal ---------- */
+let editingSchoolId = null;
+
+function openAddModal() {
+  editingSchoolId = null;
+  $('#schoolModalTitle').textContent = 'Add School';
+  $('#schoolForm').reset();
+  $('#apiKeyField').style.display = 'none';
+  $('#btnDeleteSchool').style.display = 'none';
+  $('#schoolModalError').style.display = 'none';
+  $('#schoolModalOverlay').classList.add('open');
+}
+
+function openEditModal(id) {
+  const s = schoolsCache.find(x => x.id === id);
+  if (!s) return;
+  editingSchoolId = id;
+  $('#schoolModalTitle').textContent = 'Edit School';
+  $('#fSchoolName').value = s.name || '';
+  $('#fErpUrl').value = s.erpUrl || '';
+  $('#fWebsiteUrl').value = s.websiteUrl || '';
+  $('#fStatus').value = s.status || 'temporary';
+  $('#fOnboardedDate').value = s.onboardedDate ? String(s.onboardedDate).slice(0, 10) : '';
+  $('#fNotes').value = s.notes || '';
+  $('#fApiKey').textContent = s.apiKey || '';
+  $('#apiKeyField').style.display = 'block';
+  $('#btnDeleteSchool').style.display = 'inline-block';
+  $('#schoolModalError').style.display = 'none';
+  $('#schoolModalOverlay').classList.add('open');
+}
+
+function closeSchoolModal() {
+  $('#schoolModalOverlay').classList.remove('open');
+}
+
+$('#btnAddSchool').addEventListener('click', openAddModal);
+$('#btnCancelSchool').addEventListener('click', closeSchoolModal);
+
+$('#schoolForm').addEventListener('submit', async (e) => {
+  e.preventDefault();
+  const errEl = $('#schoolModalError');
+  errEl.style.display = 'none';
+  const payload = {
+    name: $('#fSchoolName').value,
+    erpUrl: $('#fErpUrl').value,
+    websiteUrl: $('#fWebsiteUrl').value,
+    status: $('#fStatus').value,
+    onboardedDate: $('#fOnboardedDate').value || null,
+    notes: $('#fNotes').value,
+  };
+  try {
+    if (editingSchoolId) {
+      await api('/api/schools/' + editingSchoolId, { method: 'PUT', body: payload });
+      showToast('School updated.');
+    } else {
+      const created = await api('/api/schools', { method: 'POST', body: payload });
+      showToast('School added.');
+      editingSchoolId = created.id;
+      $('#fApiKey').textContent = created.apiKey;
+      $('#apiKeyField').style.display = 'block';
+      $('#btnDeleteSchool').style.display = 'inline-block';
+      await loadAll();
+      return; // keep modal open so the vendor can copy the API key
+    }
+    closeSchoolModal();
+    await loadAll();
+  } catch (err) {
+    errEl.textContent = err.message;
+    errEl.style.display = 'block';
+  }
+});
+
+$('#btnCopyKey').addEventListener('click', () => {
+  const key = $('#fApiKey').textContent;
+  navigator.clipboard.writeText(key).then(() => showToast('API key copied.')).catch(() => showToast('Could not copy — select the key manually.'));
+});
+
+$('#btnRegenKey').addEventListener('click', async () => {
+  if (!editingSchoolId) return;
+  if (!confirm('Regenerate this school\'s API key? The old key will stop working immediately — you\'ll need to update it in that school\'s reporting config.')) return;
+  try {
+    const res = await api('/api/schools/' + editingSchoolId + '/regenerate-key', { method: 'POST' });
+    $('#fApiKey').textContent = res.apiKey;
+    showToast('API key regenerated.');
+    await loadAll();
+  } catch (err) {
+    showToast('Could not regenerate key: ' + err.message);
+  }
+});
+
+$('#btnDeleteSchool').addEventListener('click', async () => {
+  if (!editingSchoolId) return;
+  const s = schoolsCache.find(x => x.id === editingSchoolId);
+  if (!confirm('Delete "' + (s ? s.name : 'this school') + '" from the registry? This cannot be undone.')) return;
+  try {
+    await api('/api/schools/' + editingSchoolId, { method: 'DELETE' });
+    showToast('School deleted.');
+    closeSchoolModal();
+    await loadAll();
+  } catch (err) {
+    showToast('Could not delete: ' + err.message);
+  }
+});
+
+/* ---------- Errors modal ---------- */
+async function openErrorsModal(id) {
+  const s = schoolsCache.find(x => x.id === id);
+  $('#errorModalTitle').textContent = 'Recent Errors — ' + (s ? s.name : '');
+  $('#errorList').innerHTML = '<div class="empty-state">Loading…</div>';
+  $('#errorModalOverlay').classList.add('open');
+  try {
+    const errors = await api('/api/schools/' + id + '/errors?limit=50');
+    if (!errors.length) {
+      $('#errorList').innerHTML = '<div class="empty-state">No errors reported. 🎉</div>';
+      return;
+    }
+    $('#errorList').innerHTML = errors.map(e => `
+      <div class="error-item">
+        <div class="err-when">${new Date(e.occurredAt).toLocaleString()}</div>
+        <div class="err-msg">${esc(e.message || '(no message)')}</div>
+        ${e.stack ? `<details><summary>Stack trace</summary><pre>${esc(e.stack)}</pre></details>` : ''}
+      </div>
+    `).join('');
+  } catch (err) {
+    $('#errorList').innerHTML = '<div class="empty-state">Could not load errors: ' + esc(err.message) + '</div>';
+  }
+}
+$('#btnCloseErrors').addEventListener('click', () => $('#errorModalOverlay').classList.remove('open'));
+
+/* ---------- Auto-refresh ---------- */
+setInterval(() => { if ($('#appShell').style.display !== 'none') loadAll().catch(() => {}); }, 30000);
+
+initAuth();
+</script>
+</body>
+</html>
