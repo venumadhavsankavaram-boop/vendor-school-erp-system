@@ -176,6 +176,7 @@
     </div>
     <div class="hdr-right">
       <span class="who" id="whoAmI"></span>
+      <button class="btn btn-ghost" id="btnAccount">Account</button>
       <button class="btn btn-ghost" id="btnLogout">Log out</button>
     </div>
   </header>
@@ -249,6 +250,63 @@
         </div>
       </div>
     </form>
+  </div>
+</div>
+
+<!-- Account Modal -->
+<div class="modal-overlay" id="accountModalOverlay">
+  <div class="modal">
+    <h3>Account</h3>
+    <div class="modal-sub">Update your profile or change your password.</div>
+
+    <form id="profileForm">
+      <div class="field">
+        <label for="fProfileName">Display Name</label>
+        <input type="text" id="fProfileName" autocomplete="name">
+      </div>
+      <div class="field">
+        <label for="fProfileUsername">Username</label>
+        <input type="text" id="fProfileUsername" autocomplete="username" required>
+      </div>
+      <div class="modal-error" id="profileError"></div>
+      <div class="modal-actions">
+        <div></div>
+        <div class="right">
+          <button type="submit" class="btn btn-accent btn-sm">Save Profile</button>
+        </div>
+      </div>
+    </form>
+
+    <hr style="border:none; border-top:1px solid var(--border); margin:22px 0;">
+
+    <form id="passwordForm">
+      <div class="field">
+        <label for="fCurrentPassword">Current Password</label>
+        <input type="password" id="fCurrentPassword" autocomplete="current-password" required>
+      </div>
+      <div class="grid-2">
+        <div class="field">
+          <label for="fNewPassword">New Password</label>
+          <input type="password" id="fNewPassword" autocomplete="new-password" minlength="8" required>
+        </div>
+        <div class="field">
+          <label for="fConfirmPassword">Confirm New Password</label>
+          <input type="password" id="fConfirmPassword" autocomplete="new-password" minlength="8" required>
+        </div>
+      </div>
+      <div class="modal-error" id="passwordError"></div>
+      <div class="modal-actions">
+        <div></div>
+        <div class="right">
+          <button type="submit" class="btn btn-accent btn-sm">Change Password</button>
+        </div>
+      </div>
+    </form>
+
+    <div class="modal-actions" style="margin-top:24px;">
+      <div></div>
+      <div class="right"><button type="button" class="btn btn-light" id="btnCloseAccount">Close</button></div>
+    </div>
   </div>
 </div>
 
@@ -351,16 +409,74 @@ $('#btnLogout').addEventListener('click', async () => {
 
 /* ---------- Dashboard data ---------- */
 let schoolsCache = [];
+let meCache = null;
 
 async function loadAll() {
   const [me, summary, schools] = await Promise.all([
     api('/api/me'), api('/api/summary'), api('/api/schools'),
   ]);
+  meCache = me;
   $('#whoAmI').textContent = 'Signed in as ' + (me.name || me.username);
   schoolsCache = schools;
   renderSummary(summary);
   renderSchoolsTable(schools);
 }
+
+/* ---------- Account (profile + password) ---------- */
+function openAccountModal() {
+  $('#profileError').style.display = 'none';
+  $('#passwordError').style.display = 'none';
+  $('#passwordForm').reset();
+  if (meCache) {
+    $('#fProfileName').value = meCache.name || '';
+    $('#fProfileUsername').value = meCache.username || '';
+  }
+  $('#accountModalOverlay').classList.add('open');
+}
+$('#btnAccount').addEventListener('click', openAccountModal);
+$('#btnCloseAccount').addEventListener('click', () => $('#accountModalOverlay').classList.remove('open'));
+
+$('#profileForm').addEventListener('submit', async (e) => {
+  e.preventDefault();
+  const errEl = $('#profileError');
+  errEl.style.display = 'none';
+  try {
+    const updated = await api('/api/account/profile', {
+      method: 'PUT',
+      body: { name: $('#fProfileName').value, username: $('#fProfileUsername').value },
+    });
+    meCache = updated;
+    $('#whoAmI').textContent = 'Signed in as ' + (updated.name || updated.username);
+    showToast('Profile updated.');
+  } catch (err) {
+    errEl.textContent = err.message;
+    errEl.style.display = 'block';
+  }
+});
+
+$('#passwordForm').addEventListener('submit', async (e) => {
+  e.preventDefault();
+  const errEl = $('#passwordError');
+  errEl.style.display = 'none';
+  const newPw = $('#fNewPassword').value;
+  const confirmPw = $('#fConfirmPassword').value;
+  if (newPw !== confirmPw) {
+    errEl.textContent = 'New password and confirmation do not match.';
+    errEl.style.display = 'block';
+    return;
+  }
+  try {
+    await api('/api/account/change-password', {
+      method: 'POST',
+      body: { currentPassword: $('#fCurrentPassword').value, newPassword: newPw },
+    });
+    $('#passwordForm').reset();
+    showToast('Password changed.');
+  } catch (err) {
+    errEl.textContent = err.message;
+    errEl.style.display = 'block';
+  }
+});
 
 function renderSummary(s) {
   const cards = [
