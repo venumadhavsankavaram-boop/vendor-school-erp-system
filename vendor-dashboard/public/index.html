@@ -63,8 +63,27 @@
 
   main{max-width:1180px; margin:0 auto; padding:26px 24px 60px;}
 
-  .cards{display:grid; grid-template-columns:repeat(5, 1fr); gap:16px; margin-bottom:26px;}
-  @media (max-width:900px){ .cards{grid-template-columns:repeat(2, 1fr);} }
+  /* ---------- Tabs ---------- */
+  .tabbar{
+    background:var(--navy-soft); display:flex; gap:2px; padding:0 26px; position:sticky; top:53px; z-index:40;
+    overflow-x:auto;
+  }
+  .tab-btn{
+    font-family:inherit; cursor:pointer; border:none; background:transparent; color:#C7C9EA; padding:13px 18px;
+    font-size:0.86rem; font-weight:600; border-bottom:3px solid transparent; white-space:nowrap;
+  }
+  .tab-btn:hover{color:#fff;}
+  .tab-btn.active{color:#fff; border-bottom-color:var(--accent);}
+  .tab-btn .count-pill{
+    display:inline-block; margin-left:6px; background:rgba(255,255,255,0.18); border-radius:10px; padding:1px 7px;
+    font-size:0.72rem; font-weight:700;
+  }
+  .tab-panel{display:none;}
+  .tab-panel.active{display:block;}
+
+  .cards{display:grid; grid-template-columns:repeat(6, 1fr); gap:16px; margin-bottom:26px;}
+  @media (max-width:1050px){ .cards{grid-template-columns:repeat(3, 1fr);} }
+  @media (max-width:600px){ .cards{grid-template-columns:repeat(2, 1fr);} }
   .card{
     background:var(--panel); border:1px solid var(--border); border-radius:14px; padding:18px 20px;
     box-shadow:var(--shadow);
@@ -92,6 +111,19 @@
   .badge{display:inline-flex; align-items:center; gap:5px; padding:3px 10px; border-radius:20px; font-size:0.74rem; font-weight:700;}
   .badge-permanent{background:#E4F7EE; color:var(--good);}
   .badge-temporary{background:#FFF3DE; color:var(--warn);}
+  .badge-paid{background:#E4F7EE; color:var(--good);}
+  .badge-pending{background:#EEF0FB; color:var(--accent);}
+  .badge-overdue{background:#FCE4EA; color:var(--bad);}
+  .badge-cancelled{background:#F0F0F5; color:var(--ink-soft);}
+  .badge-open{background:#EEF0FB; color:var(--accent);}
+  .badge-in_progress{background:#FFF3DE; color:var(--warn);}
+  .badge-resolved{background:#E4F7EE; color:var(--good);}
+  .badge-closed{background:#F0F0F5; color:var(--ink-soft);}
+  .badge-priority-low{background:#F0F0F5; color:var(--ink-soft);}
+  .badge-priority-normal{background:#EEF0FB; color:var(--accent);}
+  .badge-priority-high{background:#FCE4EA; color:var(--bad);}
+  .billing-amount{font-weight:700; color:var(--navy);}
+  .billing-none{color:var(--ink-soft); font-size:0.8rem;}
 
   .dot{width:8px; height:8px; border-radius:50%; display:inline-block;}
   .dot-online{background:var(--good);}
@@ -106,6 +138,35 @@
   .row-actions{display:flex; gap:6px; flex-wrap:wrap;}
 
   .empty-state{padding:50px 20px; text-align:center; color:var(--ink-soft);}
+
+  /* ---------- Activity feed ---------- */
+  .activity-item{display:flex; gap:12px; padding:13px 22px; border-bottom:1px solid var(--border); align-items:flex-start;}
+  .activity-item:last-child{border-bottom:none;}
+  .activity-icon{
+    width:30px; height:30px; border-radius:50%; display:flex; align-items:center; justify-content:center;
+    font-size:0.9rem; flex-shrink:0; margin-top:1px;
+  }
+  .activity-icon.err{background:#FCE4EA;}
+  .activity-icon.qry{background:#EEF0FB;}
+  .activity-icon.login{background:#FFF3DE;}
+  .activity-text{font-size:0.85rem; color:var(--ink);}
+  .activity-text b{color:var(--navy);}
+  .activity-when{font-size:0.74rem; color:var(--ink-soft); margin-top:2px;}
+
+  /* ---------- Filter bar ---------- */
+  .filter-bar{display:flex; gap:10px; padding:14px 22px; border-bottom:1px solid var(--border); flex-wrap:wrap; align-items:center;}
+  .filter-bar select{
+    padding:7px 10px; border:1.5px solid var(--border); border-radius:8px; font-size:0.8rem; font-family:inherit;
+    background:#fff;
+  }
+
+  /* ---------- Query thread ---------- */
+  .qry-message{background:#FAFAFE; border:1px solid var(--border); border-radius:10px; padding:12px 14px; font-size:0.85rem; margin-bottom:16px; white-space:pre-wrap;}
+  .qry-replies{max-height:260px; overflow-y:auto; margin-bottom:14px;}
+  .qry-reply{background:#F5F5FB; border-radius:10px; padding:10px 12px; margin-bottom:8px; font-size:0.83rem;}
+  .qry-reply .who{font-weight:700; color:var(--navy); font-size:0.78rem;}
+  .qry-reply .when{color:var(--ink-soft); font-size:0.7rem; margin-left:6px;}
+  .qry-reply .msg{margin-top:4px; white-space:pre-wrap;}
 
   /* ---------- Modal ---------- */
   .modal-overlay{
@@ -181,16 +242,78 @@
     </div>
   </header>
 
-  <main>
-    <div class="cards" id="summaryCards"></div>
+  <nav class="tabbar">
+    <button class="tab-btn active" data-tab="overview">Overview</button>
+    <button class="tab-btn" data-tab="schools">Schools</button>
+    <button class="tab-btn" data-tab="billing">Billing</button>
+    <button class="tab-btn" data-tab="support">Support<span class="count-pill" id="supportCountPill" style="display:none;"></span></button>
+  </nav>
 
-    <div class="panel">
-      <div class="panel-head">
-        <h2>Schools</h2>
-        <button class="btn btn-accent" id="btnAddSchool">+ Add School</button>
+  <main>
+
+    <!-- ===================== Overview ===================== -->
+    <div class="tab-panel active" id="tab-overview">
+      <div class="cards" id="summaryCards"></div>
+      <div class="panel">
+        <div class="panel-head"><h2>Recent Activity</h2></div>
+        <div id="activityWrap"></div>
       </div>
-      <div id="schoolsTableWrap"></div>
     </div>
+
+    <!-- ===================== Schools ===================== -->
+    <div class="tab-panel" id="tab-schools">
+      <div class="panel">
+        <div class="panel-head">
+          <h2>Schools</h2>
+          <button class="btn btn-accent" id="btnAddSchool">+ Add School</button>
+        </div>
+        <div id="schoolsTableWrap"></div>
+      </div>
+    </div>
+
+    <!-- ===================== Billing ===================== -->
+    <div class="tab-panel" id="tab-billing">
+      <div class="cards" id="billingCards" style="grid-template-columns:repeat(4, 1fr);"></div>
+      <div class="panel">
+        <div class="panel-head">
+          <h2>Invoices</h2>
+          <button class="btn btn-accent" id="btnAddInvoice">+ Add Invoice</button>
+        </div>
+        <div class="filter-bar">
+          <select id="fltInvoiceSchool"><option value="">All schools</option></select>
+          <select id="fltInvoiceStatus">
+            <option value="">All statuses</option>
+            <option value="pending">Pending</option>
+            <option value="paid">Paid</option>
+            <option value="overdue">Overdue</option>
+            <option value="cancelled">Cancelled</option>
+          </select>
+        </div>
+        <div id="invoicesTableWrap"></div>
+      </div>
+    </div>
+
+    <!-- ===================== Support ===================== -->
+    <div class="tab-panel" id="tab-support">
+      <div class="panel">
+        <div class="panel-head">
+          <h2>Support Queries</h2>
+          <button class="btn btn-accent" id="btnAddQuery">+ Log Query</button>
+        </div>
+        <div class="filter-bar">
+          <select id="fltQuerySchool"><option value="">All schools</option></select>
+          <select id="fltQueryStatus">
+            <option value="">All statuses</option>
+            <option value="open">Open</option>
+            <option value="in_progress">In Progress</option>
+            <option value="resolved">Resolved</option>
+            <option value="closed">Closed</option>
+          </select>
+        </div>
+        <div id="queriesTableWrap"></div>
+      </div>
+    </div>
+
   </main>
 </div>
 
@@ -227,9 +350,43 @@
           <input type="date" id="fOnboardedDate">
         </div>
       </div>
+      <div class="grid-2">
+        <div class="field">
+          <label for="fContactName">Contact Person</label>
+          <input type="text" id="fContactName" placeholder="Principal / admin office">
+        </div>
+        <div class="field">
+          <label for="fContactPhone">Contact Phone</label>
+          <input type="text" id="fContactPhone">
+        </div>
+      </div>
+      <div class="field">
+        <label for="fContactEmail">Contact Email</label>
+        <input type="email" id="fContactEmail">
+      </div>
+      <hr style="border:none; border-top:1px solid var(--border); margin:16px 0;">
+      <div class="grid-2">
+        <div class="field">
+          <label for="fBillingPlan">Billing Plan</label>
+          <input type="text" id="fBillingPlan" placeholder="e.g. Standard, Custom">
+        </div>
+        <div class="field">
+          <label for="fBillingCycle">Billing Cycle</label>
+          <select id="fBillingCycle">
+            <option value="">— Not billed —</option>
+            <option value="monthly">Monthly</option>
+            <option value="annual">Annual</option>
+            <option value="one_time">One-time</option>
+          </select>
+        </div>
+      </div>
+      <div class="field">
+        <label for="fBillingAmount">Billing Amount (₹)</label>
+        <input type="number" id="fBillingAmount" min="0" step="0.01" placeholder="e.g. 5000">
+      </div>
       <div class="field">
         <label for="fNotes">Notes</label>
-        <textarea id="fNotes" placeholder="Contact person, plan, anything worth remembering..."></textarea>
+        <textarea id="fNotes" placeholder="Anything else worth remembering..."></textarea>
       </div>
       <div class="field" id="apiKeyField" style="display:none;">
         <label>API Key (for this school's reporting client — see README.md)</label>
@@ -310,6 +467,137 @@
   </div>
 </div>
 
+<!-- Add / Edit Invoice Modal -->
+<div class="modal-overlay" id="invoiceModalOverlay">
+  <div class="modal">
+    <h3 id="invoiceModalTitle">Add Invoice</h3>
+    <div class="modal-sub">Track what a school owes and what's been collected.</div>
+    <form id="invoiceForm">
+      <div class="field">
+        <label for="fInvoiceSchool">School</label>
+        <select id="fInvoiceSchool" required></select>
+      </div>
+      <div class="field">
+        <label for="fInvoiceDescription">Description</label>
+        <input type="text" id="fInvoiceDescription" placeholder="e.g. Annual license — 2026-27">
+      </div>
+      <div class="grid-2">
+        <div class="field">
+          <label for="fInvoiceAmount">Amount (₹)</label>
+          <input type="number" id="fInvoiceAmount" min="0.01" step="0.01" required>
+        </div>
+        <div class="field">
+          <label for="fInvoiceDueDate">Due Date</label>
+          <input type="date" id="fInvoiceDueDate">
+        </div>
+      </div>
+      <div class="field">
+        <label for="fInvoiceStatus">Status</label>
+        <select id="fInvoiceStatus">
+          <option value="pending">Pending</option>
+          <option value="paid">Paid</option>
+          <option value="cancelled">Cancelled</option>
+        </select>
+      </div>
+      <div class="field">
+        <label for="fInvoiceNotes">Notes</label>
+        <textarea id="fInvoiceNotes"></textarea>
+      </div>
+      <div class="modal-error" id="invoiceModalError"></div>
+      <div class="modal-actions">
+        <div>
+          <button type="button" class="btn btn-danger" id="btnDeleteInvoice" style="display:none;">Delete</button>
+        </div>
+        <div class="right">
+          <button type="button" class="btn btn-light" id="btnCancelInvoice">Cancel</button>
+          <button type="submit" class="btn btn-accent" id="btnSaveInvoice">Save</button>
+        </div>
+      </div>
+    </form>
+  </div>
+</div>
+
+<!-- Add Query Modal -->
+<div class="modal-overlay" id="queryModalOverlay">
+  <div class="modal">
+    <h3>Log Support Query</h3>
+    <div class="modal-sub">Record an inquiry or issue a school raised with you.</div>
+    <form id="queryForm">
+      <div class="field">
+        <label for="fQuerySchool">School</label>
+        <select id="fQuerySchool" required></select>
+      </div>
+      <div class="field">
+        <label for="fQuerySubject">Subject</label>
+        <input type="text" id="fQuerySubject" required>
+      </div>
+      <div class="field">
+        <label for="fQueryMessage">Details</label>
+        <textarea id="fQueryMessage"></textarea>
+      </div>
+      <div class="field">
+        <label for="fQueryPriority">Priority</label>
+        <select id="fQueryPriority">
+          <option value="low">Low</option>
+          <option value="normal" selected>Normal</option>
+          <option value="high">High</option>
+        </select>
+      </div>
+      <div class="modal-error" id="queryModalError"></div>
+      <div class="modal-actions">
+        <div></div>
+        <div class="right">
+          <button type="button" class="btn btn-light" id="btnCancelQuery">Cancel</button>
+          <button type="submit" class="btn btn-accent" id="btnSaveQuery">Log Query</button>
+        </div>
+      </div>
+    </form>
+  </div>
+</div>
+
+<!-- Query Thread Modal -->
+<div class="modal-overlay" id="queryThreadOverlay">
+  <div class="modal" style="width:min(600px, 100%);">
+    <h3 id="queryThreadSubject">Query</h3>
+    <div class="modal-sub" id="queryThreadMeta"></div>
+    <div class="qry-message" id="queryThreadMessage"></div>
+    <div class="qry-replies" id="queryThreadReplies"></div>
+    <div class="field">
+      <label for="fQueryReply">Add a reply / internal note</label>
+      <textarea id="fQueryReply" placeholder="What you told the school, or a note for yourself..."></textarea>
+    </div>
+    <div class="grid-2">
+      <div class="field">
+        <label for="fQueryThreadStatus">Status</label>
+        <select id="fQueryThreadStatus">
+          <option value="open">Open</option>
+          <option value="in_progress">In Progress</option>
+          <option value="resolved">Resolved</option>
+          <option value="closed">Closed</option>
+        </select>
+      </div>
+      <div class="field">
+        <label for="fQueryThreadPriority">Priority</label>
+        <select id="fQueryThreadPriority">
+          <option value="low">Low</option>
+          <option value="normal">Normal</option>
+          <option value="high">High</option>
+        </select>
+      </div>
+    </div>
+    <div class="modal-error" id="queryThreadError"></div>
+    <div class="modal-actions">
+      <div>
+        <button type="button" class="btn btn-danger" id="btnDeleteQuery">Delete</button>
+      </div>
+      <div class="right">
+        <button type="button" class="btn btn-light" id="btnCloseQueryThread">Close</button>
+        <button type="button" class="btn btn-accent" id="btnSaveQueryThread">Save</button>
+      </div>
+    </div>
+  </div>
+</div>
+
 <!-- Error Log Modal -->
 <div class="modal-overlay" id="errorModalOverlay">
   <div class="modal" style="width:min(640px, 100%);">
@@ -366,6 +654,24 @@ function relativeTime(iso) {
   return days + 'd ago';
 }
 
+function fmtMoney(n) {
+  return '₹' + Number(n || 0).toLocaleString('en-IN', { maximumFractionDigits: 0 });
+}
+
+function titleCase(s) {
+  return String(s || '').replace(/_/g, ' ').replace(/\b\w/g, c => c.toUpperCase());
+}
+
+/* ---------- Tabs ---------- */
+$$('.tab-btn').forEach(btn => {
+  btn.addEventListener('click', () => {
+    $$('.tab-btn').forEach(b => b.classList.remove('active'));
+    $$('.tab-panel').forEach(p => p.classList.remove('active'));
+    btn.classList.add('active');
+    $('#tab-' + btn.dataset.tab).classList.add('active');
+  });
+});
+
 /* ---------- Auth ---------- */
 async function initAuth() {
   try {
@@ -409,17 +715,78 @@ $('#btnLogout').addEventListener('click', async () => {
 
 /* ---------- Dashboard data ---------- */
 let schoolsCache = [];
+let invoicesCache = [];
+let queriesCache = [];
 let meCache = null;
 
 async function loadAll() {
-  const [me, summary, schools] = await Promise.all([
-    api('/api/me'), api('/api/summary'), api('/api/schools'),
+  const [me, summary, schools, activity, billingSummary, invoices, queries] = await Promise.all([
+    api('/api/me'), api('/api/summary'), api('/api/schools'), api('/api/activity'),
+    api('/api/billing/summary'), api('/api/invoices'), api('/api/queries'),
   ]);
   meCache = me;
   $('#whoAmI').textContent = 'Signed in as ' + (me.name || me.username);
   schoolsCache = schools;
+  invoicesCache = invoices;
+  queriesCache = queries;
   renderSummary(summary);
   renderSchoolsTable(schools);
+  renderActivity(activity);
+  renderBillingCards(billingSummary);
+  populateSchoolSelects();
+  renderInvoicesTable();
+  renderQueriesTable();
+  updateSupportCountPill(summary.openQueries);
+}
+
+function populateSchoolSelects() {
+  const opts = schoolsCache.map(s => `<option value="${s.id}">${esc(s.name)}</option>`).join('');
+  $('#fInvoiceSchool').innerHTML = opts;
+  $('#fQuerySchool').innerHTML = opts;
+  const filterOpts = '<option value="">All schools</option>' + opts;
+  const curInvSchool = $('#fltInvoiceSchool').value;
+  $('#fltInvoiceSchool').innerHTML = filterOpts;
+  $('#fltInvoiceSchool').value = curInvSchool;
+  const curQrySchool = $('#fltQuerySchool').value;
+  $('#fltQuerySchool').innerHTML = filterOpts;
+  $('#fltQuerySchool').value = curQrySchool;
+}
+
+function schoolName(id) {
+  const s = schoolsCache.find(x => x.id === id);
+  return s ? s.name : '(unknown school)';
+}
+
+function updateSupportCountPill(n) {
+  const pill = $('#supportCountPill');
+  if (n > 0) { pill.textContent = n; pill.style.display = 'inline-block'; }
+  else pill.style.display = 'none';
+}
+
+/* ---------- Overview: recent activity ---------- */
+function renderActivity(items) {
+  const wrap = $('#activityWrap');
+  if (!items.length) {
+    wrap.innerHTML = '<div class="empty-state">Nothing to show yet — errors, support queries, and support logins will appear here.</div>';
+    return;
+  }
+  const iconLabel = { error: 'E', query: 'Q', support_login: 'L' };
+  const iconCls = { error: 'err', query: 'qry', support_login: 'login' };
+  wrap.innerHTML = items.map(it => {
+    let text;
+    if (it.type === 'error') text = `<b>${esc(it.schoolName)}</b> reported an error: ${esc((it.text || '(no message)').slice(0, 140))}`;
+    else if (it.type === 'query') text = `<b>${esc(it.schoolName)}</b> — new support query: ${esc(it.text)}`;
+    else text = `${esc(it.text || 'A vendor admin')} opened a support login for <b>${esc(it.schoolName)}</b>`;
+    return `
+      <div class="activity-item">
+        <div class="activity-icon ${iconCls[it.type]}">${iconLabel[it.type]}</div>
+        <div>
+          <div class="activity-text">${text}</div>
+          <div class="activity-when">${relativeTime(it.at)}</div>
+        </div>
+      </div>
+    `;
+  }).join('');
 }
 
 /* ---------- Account (profile + password) ---------- */
@@ -485,6 +852,7 @@ function renderSummary(s) {
     { label: 'Temporary / Trial', value: s.temporary, cls: '' },
     { label: 'Online Now', value: s.online, cls: 'accent-good' },
     { label: 'Errors (24h)', value: s.errors24h, cls: s.errors24h > 0 ? 'accent-bad' : '' },
+    { label: 'Open Queries', value: s.openQueries, cls: s.openQueries > 0 ? 'accent-bad' : '' },
   ];
   $('#summaryCards').innerHTML = cards.map(c => `
     <div class="card ${c.cls}">
@@ -492,6 +860,27 @@ function renderSummary(s) {
       <div class="label">${c.label}</div>
     </div>
   `).join('');
+}
+
+function renderBillingCards(s) {
+  const cards = [
+    { label: 'Outstanding', value: fmtMoney(s.outstandingTotal), cls: '' },
+    { label: 'Overdue', value: fmtMoney(s.overdueTotal) + (s.overdueCount ? ' (' + s.overdueCount + ')' : ''), cls: s.overdueCount > 0 ? 'accent-bad' : '' },
+    { label: 'Collected This Month', value: fmtMoney(s.collectedThisMonth), cls: 'accent-good' },
+    { label: 'Total Invoices', value: s.invoiceCount, cls: '' },
+  ];
+  $('#billingCards').innerHTML = cards.map(c => `
+    <div class="card ${c.cls}">
+      <div class="num">${c.value}</div>
+      <div class="label">${c.label}</div>
+    </div>
+  `).join('');
+}
+
+function billingLabel(s) {
+  if (!s.billingAmount || !s.billingCycle) return '<span class="billing-none">—</span>';
+  const cycleLabel = { monthly: '/mo', annual: '/yr', one_time: ' one-time' }[s.billingCycle] || '';
+  return `<span class="billing-amount">${fmtMoney(s.billingAmount)}${esc(cycleLabel)}</span>`;
 }
 
 function renderSchoolsTable(schools) {
@@ -509,6 +898,7 @@ function renderSchoolsTable(schools) {
           <th>Health</th>
           <th>Last Heartbeat</th>
           <th>Errors (24h)</th>
+          <th>Billing</th>
           <th>Actions</th>
         </tr>
       </thead>
@@ -525,10 +915,12 @@ function renderSchoolsTable(schools) {
             </td>
             <td>${relativeTime(s.lastHeartbeatAt)}</td>
             <td><span class="err-count ${s.errorCount24h > 0 ? 'has-errors' : ''}">${s.errorCount24h}</span></td>
+            <td>${billingLabel(s)}</td>
             <td>
               <div class="row-actions">
                 <button class="btn btn-light btn-sm" data-action="edit" data-id="${s.id}">Edit</button>
                 <button class="btn btn-light btn-sm" data-action="errors" data-id="${s.id}">Errors</button>
+                ${s.erpUrl ? `<button class="btn btn-light btn-sm" data-action="support-login" data-id="${s.id}">Support Login</button>` : ''}
               </div>
             </td>
           </tr>
@@ -542,6 +934,24 @@ function renderSchoolsTable(schools) {
   wrap.querySelectorAll('[data-action="errors"]').forEach(btn => {
     btn.addEventListener('click', () => openErrorsModal(btn.dataset.id));
   });
+  wrap.querySelectorAll('[data-action="support-login"]').forEach(btn => {
+    btn.addEventListener('click', () => openSupportLogin(btn.dataset.id));
+  });
+}
+
+/* ---------- Support Login (troubleshooting access) ---------- */
+async function openSupportLogin(id) {
+  const s = schoolsCache.find(x => x.id === id);
+  if (!s) return;
+  if (!confirm(`Open a temporary troubleshooting session in "${s.name}"'s ERP?\n\nThis opens a new tab signed in as a one-time support session. It expires in 10 minutes and is logged for accountability.\n\nNote: the school's ERP must have the vendor-support-login snippet installed (see README) for this to work.`)) return;
+  try {
+    const res = await api('/api/schools/' + id + '/support-login', { method: 'POST' });
+    window.open(res.url, '_blank');
+    showToast('Support login opened in a new tab — link expires in 10 minutes.');
+    await loadAll();
+  } catch (err) {
+    showToast('Could not open support login: ' + err.message);
+  }
 }
 
 /* ---------- Add / Edit school modal ---------- */
@@ -567,6 +977,12 @@ function openEditModal(id) {
   $('#fWebsiteUrl').value = s.websiteUrl || '';
   $('#fStatus').value = s.status || 'temporary';
   $('#fOnboardedDate').value = s.onboardedDate ? String(s.onboardedDate).slice(0, 10) : '';
+  $('#fContactName').value = s.contactName || '';
+  $('#fContactEmail').value = s.contactEmail || '';
+  $('#fContactPhone').value = s.contactPhone || '';
+  $('#fBillingPlan').value = s.billingPlan || '';
+  $('#fBillingCycle').value = s.billingCycle || '';
+  $('#fBillingAmount').value = s.billingAmount != null ? s.billingAmount : '';
   $('#fNotes').value = s.notes || '';
   $('#fApiKey').textContent = s.apiKey || '';
   $('#apiKeyField').style.display = 'block';
@@ -593,6 +1009,12 @@ $('#schoolForm').addEventListener('submit', async (e) => {
     status: $('#fStatus').value,
     onboardedDate: $('#fOnboardedDate').value || null,
     notes: $('#fNotes').value,
+    contactName: $('#fContactName').value,
+    contactEmail: $('#fContactEmail').value,
+    contactPhone: $('#fContactPhone').value,
+    billingPlan: $('#fBillingPlan').value,
+    billingCycle: $('#fBillingCycle').value,
+    billingAmount: $('#fBillingAmount').value,
   };
   try {
     if (editingSchoolId) {
@@ -672,6 +1094,268 @@ async function openErrorsModal(id) {
   }
 }
 $('#btnCloseErrors').addEventListener('click', () => $('#errorModalOverlay').classList.remove('open'));
+
+/* ---------- Billing: invoices table + filters ---------- */
+function filteredInvoices() {
+  const schoolId = $('#fltInvoiceSchool').value;
+  const status = $('#fltInvoiceStatus').value;
+  return invoicesCache.filter(i => (!schoolId || i.schoolId === schoolId) && (!status || i.effectiveStatus === status));
+}
+
+function renderInvoicesTable() {
+  const wrap = $('#invoicesTableWrap');
+  const rows = filteredInvoices();
+  if (!rows.length) {
+    wrap.innerHTML = '<div class="empty-state">No invoices match these filters.</div>';
+    return;
+  }
+  wrap.innerHTML = `
+    <table>
+      <thead><tr><th>School</th><th>Description</th><th>Amount</th><th>Status</th><th>Due Date</th><th>Actions</th></tr></thead>
+      <tbody>
+        ${rows.map(i => `
+          <tr>
+            <td class="school-name">${esc(schoolName(i.schoolId))}</td>
+            <td>${esc(i.description || '—')}</td>
+            <td class="billing-amount">${fmtMoney(i.amount)}</td>
+            <td><span class="badge badge-${i.effectiveStatus}">${titleCase(i.effectiveStatus)}</span></td>
+            <td>${i.dueDate ? new Date(i.dueDate).toLocaleDateString() : '—'}</td>
+            <td>
+              <div class="row-actions">
+                ${i.status === 'pending' ? `<button class="btn btn-light btn-sm" data-action="mark-paid" data-id="${i.id}">Mark Paid</button>` : ''}
+                <button class="btn btn-light btn-sm" data-action="edit-invoice" data-id="${i.id}">Edit</button>
+              </div>
+            </td>
+          </tr>
+        `).join('')}
+      </tbody>
+    </table>
+  `;
+  wrap.querySelectorAll('[data-action="edit-invoice"]').forEach(btn => btn.addEventListener('click', () => openEditInvoiceModal(btn.dataset.id)));
+  wrap.querySelectorAll('[data-action="mark-paid"]').forEach(btn => btn.addEventListener('click', () => markInvoicePaid(btn.dataset.id)));
+}
+
+async function markInvoicePaid(id) {
+  try {
+    await api('/api/invoices/' + id, { method: 'PUT', body: { status: 'paid' } });
+    showToast('Invoice marked as paid.');
+    await loadAll();
+  } catch (err) {
+    showToast('Could not update invoice: ' + err.message);
+  }
+}
+
+$('#fltInvoiceSchool').addEventListener('change', renderInvoicesTable);
+$('#fltInvoiceStatus').addEventListener('change', renderInvoicesTable);
+
+/* ---------- Billing: add / edit invoice modal ---------- */
+let editingInvoiceId = null;
+
+function openAddInvoiceModal() {
+  editingInvoiceId = null;
+  $('#invoiceModalTitle').textContent = 'Add Invoice';
+  $('#invoiceForm').reset();
+  populateSchoolSelects();
+  if (schoolsCache.length) $('#fInvoiceSchool').value = schoolsCache[0].id;
+  $('#btnDeleteInvoice').style.display = 'none';
+  $('#invoiceModalError').style.display = 'none';
+  $('#invoiceModalOverlay').classList.add('open');
+}
+
+function openEditInvoiceModal(id) {
+  const inv = invoicesCache.find(x => x.id === id);
+  if (!inv) return;
+  editingInvoiceId = id;
+  $('#invoiceModalTitle').textContent = 'Edit Invoice';
+  $('#fInvoiceSchool').value = inv.schoolId;
+  $('#fInvoiceDescription').value = inv.description || '';
+  $('#fInvoiceAmount').value = inv.amount;
+  $('#fInvoiceDueDate').value = inv.dueDate ? String(inv.dueDate).slice(0, 10) : '';
+  $('#fInvoiceStatus').value = inv.status;
+  $('#fInvoiceNotes').value = inv.notes || '';
+  $('#btnDeleteInvoice').style.display = 'inline-block';
+  $('#invoiceModalError').style.display = 'none';
+  $('#invoiceModalOverlay').classList.add('open');
+}
+
+$('#btnAddInvoice').addEventListener('click', openAddInvoiceModal);
+$('#btnCancelInvoice').addEventListener('click', () => $('#invoiceModalOverlay').classList.remove('open'));
+
+$('#invoiceForm').addEventListener('submit', async (e) => {
+  e.preventDefault();
+  const errEl = $('#invoiceModalError');
+  errEl.style.display = 'none';
+  const payload = {
+    schoolId: $('#fInvoiceSchool').value,
+    description: $('#fInvoiceDescription').value,
+    amount: $('#fInvoiceAmount').value,
+    dueDate: $('#fInvoiceDueDate').value || null,
+    status: $('#fInvoiceStatus').value,
+    notes: $('#fInvoiceNotes').value,
+  };
+  try {
+    if (editingInvoiceId) {
+      await api('/api/invoices/' + editingInvoiceId, { method: 'PUT', body: payload });
+      showToast('Invoice updated.');
+    } else {
+      await api('/api/invoices', { method: 'POST', body: payload });
+      showToast('Invoice added.');
+    }
+    $('#invoiceModalOverlay').classList.remove('open');
+    await loadAll();
+  } catch (err) {
+    errEl.textContent = err.message;
+    errEl.style.display = 'block';
+  }
+});
+
+$('#btnDeleteInvoice').addEventListener('click', async () => {
+  if (!editingInvoiceId) return;
+  if (!confirm('Delete this invoice? This cannot be undone.')) return;
+  try {
+    await api('/api/invoices/' + editingInvoiceId, { method: 'DELETE' });
+    showToast('Invoice deleted.');
+    $('#invoiceModalOverlay').classList.remove('open');
+    await loadAll();
+  } catch (err) {
+    showToast('Could not delete: ' + err.message);
+  }
+});
+
+/* ---------- Support: queries table + filters ---------- */
+function filteredQueries() {
+  const schoolId = $('#fltQuerySchool').value;
+  const status = $('#fltQueryStatus').value;
+  return queriesCache.filter(q => (!schoolId || q.schoolId === schoolId) && (!status || q.status === status));
+}
+
+function renderQueriesTable() {
+  const wrap = $('#queriesTableWrap');
+  const rows = filteredQueries();
+  if (!rows.length) {
+    wrap.innerHTML = '<div class="empty-state">No queries match these filters.</div>';
+    return;
+  }
+  wrap.innerHTML = `
+    <table>
+      <thead><tr><th>School</th><th>Subject</th><th>Priority</th><th>Status</th><th>Created</th><th>Actions</th></tr></thead>
+      <tbody>
+        ${rows.map(q => `
+          <tr>
+            <td class="school-name">${esc(schoolName(q.schoolId))}</td>
+            <td>${esc(q.subject)}</td>
+            <td><span class="badge badge-priority-${q.priority}">${titleCase(q.priority)}</span></td>
+            <td><span class="badge badge-${q.status}">${titleCase(q.status)}</span></td>
+            <td>${relativeTime(q.createdAt)}</td>
+            <td><div class="row-actions"><button class="btn btn-light btn-sm" data-action="open-query" data-id="${q.id}">Open</button></div></td>
+          </tr>
+        `).join('')}
+      </tbody>
+    </table>
+  `;
+  wrap.querySelectorAll('[data-action="open-query"]').forEach(btn => btn.addEventListener('click', () => openQueryThread(btn.dataset.id)));
+}
+
+$('#fltQuerySchool').addEventListener('change', renderQueriesTable);
+$('#fltQueryStatus').addEventListener('change', renderQueriesTable);
+
+/* ---------- Support: add query modal ---------- */
+function openAddQueryModal() {
+  $('#queryForm').reset();
+  populateSchoolSelects();
+  if (schoolsCache.length) $('#fQuerySchool').value = schoolsCache[0].id;
+  $('#queryModalError').style.display = 'none';
+  $('#queryModalOverlay').classList.add('open');
+}
+$('#btnAddQuery').addEventListener('click', openAddQueryModal);
+$('#btnCancelQuery').addEventListener('click', () => $('#queryModalOverlay').classList.remove('open'));
+
+$('#queryForm').addEventListener('submit', async (e) => {
+  e.preventDefault();
+  const errEl = $('#queryModalError');
+  errEl.style.display = 'none';
+  try {
+    await api('/api/queries', {
+      method: 'POST',
+      body: {
+        schoolId: $('#fQuerySchool').value,
+        subject: $('#fQuerySubject').value,
+        message: $('#fQueryMessage').value,
+        priority: $('#fQueryPriority').value,
+      },
+    });
+    showToast('Query logged.');
+    $('#queryModalOverlay').classList.remove('open');
+    await loadAll();
+  } catch (err) {
+    errEl.textContent = err.message;
+    errEl.style.display = 'block';
+  }
+});
+
+/* ---------- Support: query thread modal ---------- */
+let openQueryId = null;
+
+function openQueryThread(id) {
+  const q = queriesCache.find(x => x.id === id);
+  if (!q) return;
+  openQueryId = id;
+  $('#queryThreadSubject').textContent = q.subject;
+  $('#queryThreadMeta').textContent = schoolName(q.schoolId) + ' · ' +
+    (q.source === 'api' ? 'Submitted from school ERP' : 'Logged manually') + ' · ' +
+    new Date(q.createdAt).toLocaleString();
+  $('#queryThreadMessage').textContent = q.message || '(no details provided)';
+  $('#queryThreadReplies').innerHTML = q.replies.length
+    ? q.replies.map(r => `
+        <div class="qry-reply">
+          <span class="who">${esc(r.by)}</span><span class="when">${new Date(r.at).toLocaleString()}</span>
+          <div class="msg">${esc(r.message)}</div>
+        </div>
+      `).join('')
+    : '<div class="empty-state" style="padding:16px;">No replies yet.</div>';
+  $('#fQueryReply').value = '';
+  $('#fQueryThreadStatus').value = q.status;
+  $('#fQueryThreadPriority').value = q.priority;
+  $('#queryThreadError').style.display = 'none';
+  $('#queryThreadOverlay').classList.add('open');
+}
+
+$('#btnCloseQueryThread').addEventListener('click', () => $('#queryThreadOverlay').classList.remove('open'));
+
+$('#btnSaveQueryThread').addEventListener('click', async () => {
+  if (!openQueryId) return;
+  const errEl = $('#queryThreadError');
+  errEl.style.display = 'none';
+  try {
+    await api('/api/queries/' + openQueryId, {
+      method: 'PUT',
+      body: {
+        status: $('#fQueryThreadStatus').value,
+        priority: $('#fQueryThreadPriority').value,
+        replyMessage: $('#fQueryReply').value,
+      },
+    });
+    showToast('Query updated.');
+    $('#queryThreadOverlay').classList.remove('open');
+    await loadAll();
+  } catch (err) {
+    errEl.textContent = err.message;
+    errEl.style.display = 'block';
+  }
+});
+
+$('#btnDeleteQuery').addEventListener('click', async () => {
+  if (!openQueryId) return;
+  if (!confirm('Delete this query? This cannot be undone.')) return;
+  try {
+    await api('/api/queries/' + openQueryId, { method: 'DELETE' });
+    showToast('Query deleted.');
+    $('#queryThreadOverlay').classList.remove('open');
+    await loadAll();
+  } catch (err) {
+    showToast('Could not delete: ' + err.message);
+  }
+});
 
 /* ---------- Auto-refresh ---------- */
 setInterval(() => { if ($('#appShell').style.display !== 'none') loadAll().catch(() => {}); }, 30000);

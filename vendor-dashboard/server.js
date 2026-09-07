@@ -60,9 +60,23 @@ async function ensureSchema() {
       onboarded_date DATE,
       created_at TIMESTAMPTZ NOT NULL DEFAULT now(),
       last_heartbeat_at TIMESTAMPTZ,
-      last_heartbeat_meta JSONB
+      last_heartbeat_meta JSONB,
+      billing_plan TEXT,
+      billing_amount NUMERIC(12,2),
+      billing_cycle TEXT,
+      contact_name TEXT,
+      contact_email TEXT,
+      contact_phone TEXT
     )
   `;
+  // Columns added after the original CREATE TABLE above — IF NOT EXISTS
+  // keeps this a safe no-op against a database that already has them.
+  await sql`ALTER TABLE schools ADD COLUMN IF NOT EXISTS billing_plan TEXT`;
+  await sql`ALTER TABLE schools ADD COLUMN IF NOT EXISTS billing_amount NUMERIC(12,2)`;
+  await sql`ALTER TABLE schools ADD COLUMN IF NOT EXISTS billing_cycle TEXT`;
+  await sql`ALTER TABLE schools ADD COLUMN IF NOT EXISTS contact_name TEXT`;
+  await sql`ALTER TABLE schools ADD COLUMN IF NOT EXISTS contact_email TEXT`;
+  await sql`ALTER TABLE schools ADD COLUMN IF NOT EXISTS contact_phone TEXT`;
   await sql`
     CREATE TABLE IF NOT EXISTS school_errors (
       id TEXT PRIMARY KEY,
@@ -74,6 +88,48 @@ async function ensureSchema() {
     )
   `;
   await sql`CREATE INDEX IF NOT EXISTS idx_school_errors_school_id ON school_errors (school_id, occurred_at DESC)`;
+  await sql`
+    CREATE TABLE IF NOT EXISTS vendor_invoices (
+      id TEXT PRIMARY KEY,
+      school_id TEXT NOT NULL REFERENCES schools(id) ON DELETE CASCADE,
+      description TEXT,
+      amount NUMERIC(12,2) NOT NULL,
+      currency TEXT NOT NULL DEFAULT 'INR',
+      status TEXT NOT NULL DEFAULT 'pending',
+      due_date DATE,
+      paid_at TIMESTAMPTZ,
+      created_at TIMESTAMPTZ NOT NULL DEFAULT now(),
+      notes TEXT
+    )
+  `;
+  await sql`CREATE INDEX IF NOT EXISTS idx_vendor_invoices_school_id ON vendor_invoices (school_id, created_at DESC)`;
+  await sql`
+    CREATE TABLE IF NOT EXISTS vendor_queries (
+      id TEXT PRIMARY KEY,
+      school_id TEXT NOT NULL REFERENCES schools(id) ON DELETE CASCADE,
+      subject TEXT NOT NULL,
+      message TEXT,
+      priority TEXT NOT NULL DEFAULT 'normal',
+      status TEXT NOT NULL DEFAULT 'open',
+      source TEXT NOT NULL DEFAULT 'manual',
+      replies JSONB NOT NULL DEFAULT '[]',
+      created_at TIMESTAMPTZ NOT NULL DEFAULT now(),
+      updated_at TIMESTAMPTZ NOT NULL DEFAULT now(),
+      resolved_at TIMESTAMPTZ
+    )
+  `;
+  await sql`CREATE INDEX IF NOT EXISTS idx_vendor_queries_school_id ON vendor_queries (school_id, created_at DESC)`;
+  await sql`
+    CREATE TABLE IF NOT EXISTS vendor_support_logins (
+      id TEXT PRIMARY KEY,
+      school_id TEXT NOT NULL REFERENCES schools(id) ON DELETE CASCADE,
+      admin_id TEXT,
+      admin_name TEXT,
+      created_at TIMESTAMPTZ NOT NULL DEFAULT now(),
+      expires_at TIMESTAMPTZ NOT NULL
+    )
+  `;
+  await sql`CREATE INDEX IF NOT EXISTS idx_vendor_support_logins_school_id ON vendor_support_logins (school_id, created_at DESC)`;
 }
 await ensureSchema();
 
@@ -149,6 +205,7 @@ const PUBLIC_API_ROUTES = [
   { path: '/api/logout', methods: ['POST'] },
   { path: '/api/ingest/heartbeat', methods: ['POST'] },
   { path: '/api/ingest/error', methods: ['POST'] },
+  { path: '/api/ingest/query', methods: ['POST'] },
 ];
 function isPublicApiRoute(req) {
   return PUBLIC_API_ROUTES.some(r => r.path === req.path && r.methods.includes(req.method));
@@ -339,6 +396,12 @@ function shapeSchool(row, errorCount24h) {
     lastHeartbeatMeta: row.last_heartbeat_meta,
     health: heartbeatStatus(row.last_heartbeat_at),
     errorCount24h: errorCount24h || 0,
+    billingPlan: row.billing_plan,
+    billingAmount: row.billing_amount != null ? Number(row.billing_amount) : null,
+    billingCycle: row.billing_cycle,
+    contactName: row.contact_name,
+    contactEmail: row.contact_email,
+    contactPhone: row.contact_phone,
   };
 }
 
@@ -360,13 +423,23 @@ app.get('/api/schools', async (req, res) => {
 
 app.post('/api/schools', async (req, res) => {
   try {
-    const { name, erpUrl, websiteUrl, status, notes, onboardedDate } = req.body || {};
+    const {
+      name, erpUrl, websiteUrl, status, notes, onboardedDate,
+      billingPlan, billingAmount, billingCycle, contactName, contactEmail, contactPhone,
+    } = req.body || {};
     if (!name || !String(name).trim()) return res.status(400).json({ error: 'School name is required.' });
     const id = 'sch_' + crypto.randomBytes(8).toString('hex');
     const apiKey = crypto.randomBytes(24).toString('base64url');
     await sql`
-      INSERT INTO schools (id, name, erp_url, website_url, status, notes, api_key, onboarded_date)
-      VALUES (${id}, ${String(name).trim()}, ${erpUrl || null}, ${websiteUrl || null}, ${status || 'temporary'}, ${notes || null}, ${apiKey}, ${onboardedDate || null})
+      INSERT INTO schools (
+        id, name, erp_url, website_url, status, notes, api_key, onboarded_date,
+        billing_plan, billing_amount, billing_cycle, contact_name, contact_email, contact_phone
+      )
+      VALUES (
+        ${id}, ${String(name).trim()}, ${erpUrl || null}, ${websiteUrl || null}, ${status || 'temporary'}, ${notes || null}, ${apiKey}, ${onboardedDate || null},
+        ${billingPlan || null}, ${billingAmount != null && billingAmount !== '' ? Number(billingAmount) : null}, ${billingCycle || null},
+        ${contactName || null}, ${contactEmail || null}, ${contactPhone || null}
+      )
     `;
     const rows = await sql`SELECT * FROM schools WHERE id = ${id}`;
     return res.status(201).json(shapeSchool(rows[0], 0));
@@ -382,7 +455,10 @@ app.put('/api/schools/:id', async (req, res) => {
     const existing = await sql`SELECT * FROM schools WHERE id = ${id}`;
     if (!existing.length) return res.status(404).json({ error: 'School not found.' });
     const cur = existing[0];
-    const { name, erpUrl, websiteUrl, status, notes, onboardedDate } = req.body || {};
+    const {
+      name, erpUrl, websiteUrl, status, notes, onboardedDate,
+      billingPlan, billingAmount, billingCycle, contactName, contactEmail, contactPhone,
+    } = req.body || {};
     await sql`
       UPDATE schools SET
         name = ${name != null ? String(name).trim() : cur.name},
@@ -390,7 +466,13 @@ app.put('/api/schools/:id', async (req, res) => {
         website_url = ${websiteUrl != null ? websiteUrl : cur.website_url},
         status = ${status != null ? status : cur.status},
         notes = ${notes != null ? notes : cur.notes},
-        onboarded_date = ${onboardedDate != null ? onboardedDate : cur.onboarded_date}
+        onboarded_date = ${onboardedDate != null ? onboardedDate : cur.onboarded_date},
+        billing_plan = ${billingPlan != null ? billingPlan : cur.billing_plan},
+        billing_amount = ${billingAmount != null && billingAmount !== '' ? Number(billingAmount) : (billingAmount === '' ? null : cur.billing_amount)},
+        billing_cycle = ${billingCycle != null ? billingCycle : cur.billing_cycle},
+        contact_name = ${contactName != null ? contactName : cur.contact_name},
+        contact_email = ${contactEmail != null ? contactEmail : cur.contact_email},
+        contact_phone = ${contactPhone != null ? contactPhone : cur.contact_phone}
       WHERE id = ${id}
     `;
     const rows = await sql`SELECT * FROM schools WHERE id = ${id}`;
@@ -448,13 +530,368 @@ app.get('/api/summary', async (req, res) => {
     const permanent = schools.filter(s => s.status === 'permanent').length;
     const online = schools.filter(s => heartbeatStatus(s.last_heartbeat_at) === 'online').length;
     const errRows = await sql`SELECT COUNT(*)::int AS cnt FROM school_errors WHERE occurred_at > now() - interval '24 hours'`;
+    const openQueryRows = await sql`SELECT COUNT(*)::int AS cnt FROM vendor_queries WHERE status IN ('open', 'in_progress')`;
     return res.status(200).json({
       total, temporary, permanent, online,
       offline: total - online,
       errors24h: errRows[0].cnt,
+      openQueries: openQueryRows[0].cnt,
     });
   } catch (err) {
     console.error('summary error:', err);
+    return res.status(500).json({ error: 'Something went wrong on the server.' });
+  }
+});
+
+// A single feed for the Overview tab: the most recent errors, support
+// queries, and support-login events across every school, merged and sorted.
+// Kept intentionally lightweight (small per-source limits) — this is a
+// glanceable "what's happened lately" list, not a full audit log (each
+// source's own tab has the complete history).
+app.get('/api/activity', async (req, res) => {
+  try {
+    const limit = Math.min(parseInt(req.query.limit, 10) || 20, 100);
+    const [errors, queries, logins] = await Promise.all([
+      sql`
+        SELECT se.id, se.message, se.occurred_at AS at, s.id AS school_id, s.name AS school_name
+        FROM school_errors se JOIN schools s ON s.id = se.school_id
+        ORDER BY se.occurred_at DESC LIMIT ${limit}
+      `,
+      sql`
+        SELECT q.id, q.subject, q.status, q.created_at AS at, s.id AS school_id, s.name AS school_name
+        FROM vendor_queries q JOIN schools s ON s.id = q.school_id
+        ORDER BY q.created_at DESC LIMIT ${limit}
+      `,
+      sql`
+        SELECT sl.id, sl.admin_name, sl.created_at AS at, s.id AS school_id, s.name AS school_name
+        FROM vendor_support_logins sl JOIN schools s ON s.id = sl.school_id
+        ORDER BY sl.created_at DESC LIMIT ${limit}
+      `,
+    ]);
+    const items = [
+      ...errors.map(r => ({ type: 'error', id: r.id, at: r.at, schoolId: r.school_id, schoolName: r.school_name, text: r.message })),
+      ...queries.map(r => ({ type: 'query', id: r.id, at: r.at, schoolId: r.school_id, schoolName: r.school_name, text: r.subject, status: r.status })),
+      ...logins.map(r => ({ type: 'support_login', id: r.id, at: r.at, schoolId: r.school_id, schoolName: r.school_name, text: r.admin_name })),
+    ].sort((a, b) => new Date(b.at).getTime() - new Date(a.at).getTime()).slice(0, limit);
+    return res.status(200).json(items);
+  } catch (err) {
+    console.error('activity error:', err);
+    return res.status(500).json({ error: 'Something went wrong on the server.' });
+  }
+});
+
+// ---------- Billing ----------
+function shapeInvoice(row) {
+  const dueDate = row.due_date ? new Date(row.due_date) : null;
+  const isOverdue = row.status === 'pending' && dueDate && dueDate.getTime() < Date.now();
+  return {
+    id: row.id,
+    schoolId: row.school_id,
+    description: row.description,
+    amount: Number(row.amount),
+    currency: row.currency,
+    status: row.status,
+    effectiveStatus: isOverdue ? 'overdue' : row.status,
+    dueDate: row.due_date,
+    paidAt: row.paid_at,
+    createdAt: row.created_at,
+    notes: row.notes,
+  };
+}
+
+app.get('/api/invoices', async (req, res) => {
+  try {
+    const { schoolId, status } = req.query || {};
+    let rows;
+    if (schoolId && status) {
+      rows = await sql`SELECT * FROM vendor_invoices WHERE school_id = ${schoolId} AND status = ${status} ORDER BY created_at DESC`;
+    } else if (schoolId) {
+      rows = await sql`SELECT * FROM vendor_invoices WHERE school_id = ${schoolId} ORDER BY created_at DESC`;
+    } else if (status) {
+      rows = await sql`SELECT * FROM vendor_invoices WHERE status = ${status} ORDER BY created_at DESC`;
+    } else {
+      rows = await sql`SELECT * FROM vendor_invoices ORDER BY created_at DESC`;
+    }
+    return res.status(200).json(rows.map(shapeInvoice));
+  } catch (err) {
+    console.error('list invoices error:', err);
+    return res.status(500).json({ error: 'Something went wrong on the server.' });
+  }
+});
+
+app.post('/api/invoices', async (req, res) => {
+  try {
+    const { schoolId, description, amount, currency, status, dueDate, notes } = req.body || {};
+    if (!schoolId) return res.status(400).json({ error: 'schoolId is required.' });
+    if (amount == null || isNaN(Number(amount)) || Number(amount) <= 0) return res.status(400).json({ error: 'A positive amount is required.' });
+    const school = await sql`SELECT id FROM schools WHERE id = ${schoolId}`;
+    if (!school.length) return res.status(404).json({ error: 'School not found.' });
+    const id = 'inv_' + crypto.randomBytes(8).toString('hex');
+    const finalStatus = status || 'pending';
+    await sql`
+      INSERT INTO vendor_invoices (id, school_id, description, amount, currency, status, due_date, paid_at, notes)
+      VALUES (${id}, ${schoolId}, ${description || null}, ${Number(amount)}, ${currency || 'INR'}, ${finalStatus}, ${dueDate || null}, ${finalStatus === 'paid' ? new Date().toISOString() : null}, ${notes || null})
+    `;
+    const rows = await sql`SELECT * FROM vendor_invoices WHERE id = ${id}`;
+    return res.status(201).json(shapeInvoice(rows[0]));
+  } catch (err) {
+    console.error('create invoice error:', err);
+    return res.status(500).json({ error: 'Something went wrong on the server.' });
+  }
+});
+
+app.put('/api/invoices/:id', async (req, res) => {
+  try {
+    const { id } = req.params;
+    const existing = await sql`SELECT * FROM vendor_invoices WHERE id = ${id}`;
+    if (!existing.length) return res.status(404).json({ error: 'Invoice not found.' });
+    const cur = existing[0];
+    const { description, amount, currency, status, dueDate, notes } = req.body || {};
+    const finalStatus = status != null ? status : cur.status;
+    // Stamp paid_at the moment an invoice transitions into 'paid'; clear it if
+    // it's ever moved back out of 'paid' (e.g. correcting a mistaken mark).
+    let paidAt = cur.paid_at;
+    if (finalStatus === 'paid' && cur.status !== 'paid') paidAt = new Date().toISOString();
+    else if (finalStatus !== 'paid') paidAt = null;
+    await sql`
+      UPDATE vendor_invoices SET
+        description = ${description != null ? description : cur.description},
+        amount = ${amount != null && amount !== '' ? Number(amount) : cur.amount},
+        currency = ${currency != null ? currency : cur.currency},
+        status = ${finalStatus},
+        due_date = ${dueDate != null ? dueDate : cur.due_date},
+        paid_at = ${paidAt},
+        notes = ${notes != null ? notes : cur.notes}
+      WHERE id = ${id}
+    `;
+    const rows = await sql`SELECT * FROM vendor_invoices WHERE id = ${id}`;
+    return res.status(200).json(shapeInvoice(rows[0]));
+  } catch (err) {
+    console.error('update invoice error:', err);
+    return res.status(500).json({ error: 'Something went wrong on the server.' });
+  }
+});
+
+app.delete('/api/invoices/:id', async (req, res) => {
+  try {
+    await sql`DELETE FROM vendor_invoices WHERE id = ${req.params.id}`;
+    return res.status(200).json({ ok: true });
+  } catch (err) {
+    console.error('delete invoice error:', err);
+    return res.status(500).json({ error: 'Something went wrong on the server.' });
+  }
+});
+
+app.get('/api/billing/summary', async (req, res) => {
+  try {
+    const rows = await sql`SELECT status, amount, due_date, paid_at FROM vendor_invoices`;
+    const now = Date.now();
+    const startOfMonth = new Date(); startOfMonth.setDate(1); startOfMonth.setHours(0, 0, 0, 0);
+    let outstandingTotal = 0, overdueTotal = 0, overdueCount = 0, collectedThisMonth = 0;
+    for (const r of rows) {
+      const amt = Number(r.amount) || 0;
+      if (r.status === 'pending') {
+        outstandingTotal += amt;
+        if (r.due_date && new Date(r.due_date).getTime() < now) { overdueTotal += amt; overdueCount++; }
+      }
+      if (r.status === 'paid' && r.paid_at && new Date(r.paid_at).getTime() >= startOfMonth.getTime()) {
+        collectedThisMonth += amt;
+      }
+    }
+    return res.status(200).json({
+      outstandingTotal, overdueTotal, overdueCount, collectedThisMonth, invoiceCount: rows.length,
+    });
+  } catch (err) {
+    console.error('billing summary error:', err);
+    return res.status(500).json({ error: 'Something went wrong on the server.' });
+  }
+});
+
+// ---------- Support Queries (inquiries FROM schools, or logged by the vendor) ----------
+function shapeQuery(row) {
+  return {
+    id: row.id,
+    schoolId: row.school_id,
+    subject: row.subject,
+    message: row.message,
+    priority: row.priority,
+    status: row.status,
+    source: row.source,
+    replies: row.replies || [],
+    createdAt: row.created_at,
+    updatedAt: row.updated_at,
+    resolvedAt: row.resolved_at,
+  };
+}
+
+app.get('/api/queries', async (req, res) => {
+  try {
+    const { schoolId, status } = req.query || {};
+    let rows;
+    if (schoolId && status) {
+      rows = await sql`SELECT * FROM vendor_queries WHERE school_id = ${schoolId} AND status = ${status} ORDER BY created_at DESC`;
+    } else if (schoolId) {
+      rows = await sql`SELECT * FROM vendor_queries WHERE school_id = ${schoolId} ORDER BY created_at DESC`;
+    } else if (status) {
+      rows = await sql`SELECT * FROM vendor_queries WHERE status = ${status} ORDER BY created_at DESC`;
+    } else {
+      rows = await sql`SELECT * FROM vendor_queries ORDER BY created_at DESC`;
+    }
+    return res.status(200).json(rows.map(shapeQuery));
+  } catch (err) {
+    console.error('list queries error:', err);
+    return res.status(500).json({ error: 'Something went wrong on the server.' });
+  }
+});
+
+app.post('/api/queries', async (req, res) => {
+  try {
+    const { schoolId, subject, message, priority } = req.body || {};
+    if (!schoolId) return res.status(400).json({ error: 'schoolId is required.' });
+    if (!subject || !String(subject).trim()) return res.status(400).json({ error: 'Subject is required.' });
+    const school = await sql`SELECT id FROM schools WHERE id = ${schoolId}`;
+    if (!school.length) return res.status(404).json({ error: 'School not found.' });
+    const id = 'qry_' + crypto.randomBytes(8).toString('hex');
+    await sql`
+      INSERT INTO vendor_queries (id, school_id, subject, message, priority, source)
+      VALUES (${id}, ${schoolId}, ${String(subject).trim()}, ${message || null}, ${priority || 'normal'}, 'manual')
+    `;
+    const rows = await sql`SELECT * FROM vendor_queries WHERE id = ${id}`;
+    return res.status(201).json(shapeQuery(rows[0]));
+  } catch (err) {
+    console.error('create query error:', err);
+    return res.status(500).json({ error: 'Something went wrong on the server.' });
+  }
+});
+
+app.put('/api/queries/:id', async (req, res) => {
+  try {
+    const { id } = req.params;
+    const existing = await sql`SELECT * FROM vendor_queries WHERE id = ${id}`;
+    if (!existing.length) return res.status(404).json({ error: 'Query not found.' });
+    const cur = existing[0];
+    const { status, priority, replyMessage } = req.body || {};
+    let replies = Array.isArray(cur.replies) ? cur.replies.slice() : [];
+    if (replyMessage && String(replyMessage).trim()) {
+      replies.push({
+        by: (req.authAdmin && req.authAdmin.name) || 'Vendor',
+        message: String(replyMessage).trim(),
+        at: new Date().toISOString(),
+      });
+    }
+    const finalStatus = status != null ? status : cur.status;
+    const resolvedAt = (finalStatus === 'resolved' || finalStatus === 'closed')
+      ? (cur.resolved_at || new Date().toISOString())
+      : null;
+    await sql`
+      UPDATE vendor_queries SET
+        status = ${finalStatus},
+        priority = ${priority != null ? priority : cur.priority},
+        replies = ${JSON.stringify(replies)},
+        updated_at = now(),
+        resolved_at = ${resolvedAt}
+      WHERE id = ${id}
+    `;
+    const rows = await sql`SELECT * FROM vendor_queries WHERE id = ${id}`;
+    return res.status(200).json(shapeQuery(rows[0]));
+  } catch (err) {
+    console.error('update query error:', err);
+    return res.status(500).json({ error: 'Something went wrong on the server.' });
+  }
+});
+
+app.delete('/api/queries/:id', async (req, res) => {
+  try {
+    await sql`DELETE FROM vendor_queries WHERE id = ${req.params.id}`;
+    return res.status(200).json({ ok: true });
+  } catch (err) {
+    console.error('delete query error:', err);
+    return res.status(500).json({ error: 'Something went wrong on the server.' });
+  }
+});
+
+// A school's own ERP can optionally submit an inquiry the same opt-in way it
+// sends heartbeats/errors — see reporting-client/vendor-reporting.js's
+// reportVendorQuery(). Authenticates with that school's schoolId+apiKey, the
+// same narrow credential the other ingest routes use.
+app.post('/api/ingest/query', async (req, res) => {
+  try {
+    const school = await authenticateSchool(req, res);
+    if (!school) return;
+    const { subject, message, priority } = req.body || {};
+    if (!subject || !String(subject).trim()) return res.status(400).json({ error: 'subject is required.' });
+    const id = 'qry_' + crypto.randomBytes(8).toString('hex');
+    await sql`
+      INSERT INTO vendor_queries (id, school_id, subject, message, priority, source)
+      VALUES (${id}, ${school.id}, ${String(subject).trim().slice(0, 300)}, ${String(message || '').slice(0, 4000)}, ${priority || 'normal'}, 'api')
+    `;
+    return res.status(201).json({ ok: true });
+  } catch (err) {
+    console.error('query ingest error:', err);
+    return res.status(500).json({ error: 'Something went wrong on the server.' });
+  }
+});
+
+// ---------- Support Login (troubleshooting access into a school's ERP) ----------
+// Issues a short-lived, signed token the vendor can use to open a school's
+// ERP with a temporary support session — for troubleshooting, without ever
+// needing that school's own admin password. The token is verified on the
+// ERP side by the companion reporting-client/vendor-support-login.js
+// snippet (opt-in per school, same as the reporting client). Every issuance
+// is written to vendor_support_logins as an audit trail, since this is a
+// meaningfully sensitive capability.
+const SUPPORT_LOGIN_TTL_MS = 10 * 60 * 1000; // 10 minutes
+
+function signSupportLoginToken(payload, secret) {
+  const body = Buffer.from(JSON.stringify(payload)).toString('base64url');
+  const sig = crypto.createHmac('sha256', secret).update(body).digest('base64url');
+  return `${body}.${sig}`;
+}
+
+app.post('/api/schools/:id/support-login', async (req, res) => {
+  if (!req.authAdmin) return res.status(401).json({ error: 'Not logged in.' });
+  try {
+    const rows = await sql`SELECT * FROM schools WHERE id = ${req.params.id}`;
+    if (!rows.length) return res.status(404).json({ error: 'School not found.' });
+    const school = rows[0];
+    if (!school.erp_url) return res.status(400).json({ error: 'This school has no ERP URL on file yet — add one from Edit School first.' });
+    const now = Date.now();
+    const payload = {
+      schoolId: school.id,
+      adminId: req.authAdmin.id,
+      adminName: req.authAdmin.name,
+      iat: now,
+      exp: now + SUPPORT_LOGIN_TTL_MS,
+    };
+    const token = signSupportLoginToken(payload, school.api_key);
+    const auditId = 'spl_' + crypto.randomBytes(8).toString('hex');
+    await sql`
+      INSERT INTO vendor_support_logins (id, school_id, admin_id, admin_name, expires_at)
+      VALUES (${auditId}, ${school.id}, ${req.authAdmin.id}, ${req.authAdmin.name}, ${new Date(payload.exp).toISOString()})
+    `;
+    const base = String(school.erp_url).replace(/\/$/, '');
+    const url = `${base}/api/vendor-support-login?token=${encodeURIComponent(token)}`;
+    return res.status(200).json({ url, expiresAt: new Date(payload.exp).toISOString() });
+  } catch (err) {
+    console.error('support login error:', err);
+    return res.status(500).json({ error: 'Something went wrong on the server.' });
+  }
+});
+
+app.get('/api/support-logins', async (req, res) => {
+  try {
+    const limit = Math.min(parseInt(req.query.limit, 10) || 30, 200);
+    const rows = await sql`
+      SELECT sl.*, s.name AS school_name FROM vendor_support_logins sl
+      JOIN schools s ON s.id = sl.school_id
+      ORDER BY sl.created_at DESC LIMIT ${limit}
+    `;
+    return res.status(200).json(rows.map(r => ({
+      id: r.id, schoolId: r.school_id, schoolName: r.school_name,
+      adminName: r.admin_name, createdAt: r.created_at, expiresAt: r.expires_at,
+    })));
+  } catch (err) {
+    console.error('list support logins error:', err);
     return res.status(500).json({ error: 'Something went wrong on the server.' });
   }
 });
