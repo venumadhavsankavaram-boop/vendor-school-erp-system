@@ -552,6 +552,36 @@
       </div>
     </form>
 
+    <hr style="border:none; border-top:1px solid var(--border); margin:22px 0;">
+
+    <form id="settingsForm">
+      <div class="field">
+        <label style="font-weight:600;">Business Contact</label>
+        <div class="modal-sub" style="margin:2px 0 12px;">What SVM EdTech's own public marketing site shows for Email, Call, and WhatsApp.</div>
+      </div>
+      <div class="field">
+        <label for="fContactEmail">Contact Email</label>
+        <input type="email" id="fContactEmail" placeholder="e.g. you@yourdomain.in">
+      </div>
+      <div class="grid-2">
+        <div class="field">
+          <label for="fContactPhone">Phone Number</label>
+          <input type="tel" id="fContactPhone" placeholder="e.g. 9701424177">
+        </div>
+        <div class="field">
+          <label for="fContactWhatsapp">WhatsApp Number</label>
+          <input type="tel" id="fContactWhatsapp" placeholder="e.g. 9701424177">
+        </div>
+      </div>
+      <div class="modal-error" id="settingsError"></div>
+      <div class="modal-actions">
+        <div></div>
+        <div class="right">
+          <button type="submit" class="btn btn-accent btn-sm">Save Business Contact</button>
+        </div>
+      </div>
+    </form>
+
     <div class="modal-actions" style="margin-top:24px;">
       <div></div>
       <div class="right"><button type="button" class="btn btn-light" id="btnCloseAccount">Close</button></div>
@@ -964,16 +994,27 @@ function renderActivity(items) {
   }).join('');
 }
 
-/* ---------- Account (profile + password) ---------- */
-function openAccountModal() {
+/* ---------- Account (profile + password + business contact) ---------- */
+let settingsCache = {};
+
+async function openAccountModal() {
   $('#profileError').style.display = 'none';
   $('#passwordError').style.display = 'none';
+  $('#settingsError').style.display = 'none';
   $('#passwordForm').reset();
   if (meCache) {
     $('#fProfileName').value = meCache.name || '';
     $('#fProfileUsername').value = meCache.username || '';
   }
   $('#accountModalOverlay').classList.add('open');
+  try {
+    settingsCache = await api('/api/settings');
+    $('#fContactEmail').value = settingsCache.contactEmail || '';
+    $('#fContactPhone').value = settingsCache.contactPhone || '';
+    $('#fContactWhatsapp').value = settingsCache.contactWhatsapp || '';
+  } catch (err) {
+    // Non-fatal — the rest of the Account modal still works.
+  }
 }
 $('#btnAccount').addEventListener('click', openAccountModal);
 $('#btnCloseAccount').addEventListener('click', () => $('#accountModalOverlay').classList.remove('open'));
@@ -1014,6 +1055,26 @@ $('#passwordForm').addEventListener('submit', async (e) => {
     });
     $('#passwordForm').reset();
     showToast('Password changed.');
+  } catch (err) {
+    errEl.textContent = err.message;
+    errEl.style.display = 'block';
+  }
+});
+
+$('#settingsForm').addEventListener('submit', async (e) => {
+  e.preventDefault();
+  const errEl = $('#settingsError');
+  errEl.style.display = 'none';
+  try {
+    settingsCache = await api('/api/settings', {
+      method: 'PUT',
+      body: {
+        contactEmail: $('#fContactEmail').value,
+        contactPhone: $('#fContactPhone').value,
+        contactWhatsapp: $('#fContactWhatsapp').value,
+      },
+    });
+    showToast('Business contact details saved.');
   } catch (err) {
     errEl.textContent = err.message;
     errEl.style.display = 'block';

@@ -253,6 +253,19 @@ async function ensureSchema() {
     )
   `;
   await sql`CREATE INDEX IF NOT EXISTS idx_vendor_expenses_date ON vendor_expenses (expense_date DESC)`;
+  // SVM EdTech's own public-facing business contact details — a single row,
+  // edited from Account → Business Contact. This is the source of truth
+  // Venu updates; the public marketing site is a separate static page and
+  // has to be told about changes separately, it doesn't read this live.
+  await sql`
+    CREATE TABLE IF NOT EXISTS vendor_settings (
+      id TEXT PRIMARY KEY,
+      contact_email TEXT,
+      contact_phone TEXT,
+      contact_whatsapp TEXT,
+      updated_at TIMESTAMPTZ NOT NULL DEFAULT now()
+    )
+  `;
 }
 await ensureSchema();
 
@@ -488,6 +501,48 @@ app.post('/api/account/change-password', async (req, res) => {
     return res.status(200).json({ ok: true });
   } catch (err) {
     console.error('change password error:', err);
+    return res.status(500).json({ error: 'Something went wrong on the server.' });
+  }
+});
+
+// ---------- Business contact settings (Account → Business Contact) ----------
+// A single row, id 'default'. This is what SVM EdTech shows as its own
+// email/phone/WhatsApp — separate from any school's own contact details.
+function shapeSettings(row) {
+  return {
+    contactEmail: row ? row.contact_email : null,
+    contactPhone: row ? row.contact_phone : null,
+    contactWhatsapp: row ? row.contact_whatsapp : null,
+    updatedAt: row ? row.updated_at : null,
+  };
+}
+
+app.get('/api/settings', async (req, res) => {
+  try {
+    const rows = await sql`SELECT * FROM vendor_settings WHERE id = 'default'`;
+    return res.status(200).json(shapeSettings(rows[0]));
+  } catch (err) {
+    console.error('get settings error:', err);
+    return res.status(500).json({ error: 'Something went wrong on the server.' });
+  }
+});
+
+app.put('/api/settings', async (req, res) => {
+  try {
+    const { contactEmail, contactPhone, contactWhatsapp } = req.body || {};
+    await sql`
+      INSERT INTO vendor_settings (id, contact_email, contact_phone, contact_whatsapp, updated_at)
+      VALUES ('default', ${contactEmail || null}, ${contactPhone || null}, ${contactWhatsapp || null}, now())
+      ON CONFLICT (id) DO UPDATE SET
+        contact_email = ${contactEmail || null},
+        contact_phone = ${contactPhone || null},
+        contact_whatsapp = ${contactWhatsapp || null},
+        updated_at = now()
+    `;
+    const rows = await sql`SELECT * FROM vendor_settings WHERE id = 'default'`;
+    return res.status(200).json(shapeSettings(rows[0]));
+  } catch (err) {
+    console.error('update settings error:', err);
     return res.status(500).json({ error: 'Something went wrong on the server.' });
   }
 });
