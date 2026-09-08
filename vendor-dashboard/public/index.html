@@ -264,6 +264,7 @@
     <button class="tab-btn active" data-tab="overview">Overview</button>
     <button class="tab-btn" data-tab="schools">Schools</button>
     <button class="tab-btn" data-tab="billing">Billing</button>
+    <button class="tab-btn" data-tab="accounting">Accounting</button>
     <button class="tab-btn" data-tab="support">Support<span class="count-pill" id="supportCountPill" style="display:none;"></span></button>
   </nav>
 
@@ -295,7 +296,10 @@
       <div class="panel">
         <div class="panel-head">
           <h2>Invoices</h2>
-          <button class="btn btn-accent" id="btnAddInvoice">+ Add Invoice</button>
+          <div style="display:flex; gap:8px;">
+            <button class="btn btn-light" id="btnGenerateInvoices">Generate Invoices</button>
+            <button class="btn btn-accent" id="btnAddInvoice">+ Add Invoice</button>
+          </div>
         </div>
         <div class="filter-bar">
           <select id="fltInvoiceSchool"><option value="">All schools</option></select>
@@ -308,6 +312,22 @@
           </select>
         </div>
         <div id="invoicesTableWrap"></div>
+      </div>
+    </div>
+
+    <!-- ===================== Accounting ===================== -->
+    <div class="tab-panel" id="tab-accounting">
+      <div class="cards" id="accountingCards" style="grid-template-columns:repeat(3, 1fr);"></div>
+      <div class="panel">
+        <div class="panel-head"><h2>Last 12 Months</h2></div>
+        <div id="acctTrendWrap"></div>
+      </div>
+      <div class="panel">
+        <div class="panel-head">
+          <h2>Expenses</h2>
+          <button class="btn btn-accent" id="btnAddExpense">+ Add Expense</button>
+        </div>
+        <div id="expensesTableWrap"></div>
       </div>
     </div>
 
@@ -571,6 +591,27 @@
           <option value="cancelled">Cancelled</option>
         </select>
       </div>
+      <div class="field" style="border-top:1px solid #263042; padding-top:12px; margin-top:4px;">
+        <label style="display:flex; align-items:center; gap:8px; cursor:pointer;">
+          <input type="checkbox" id="fInvoiceGstApplicable" style="width:auto;">
+          Apply GST to this invoice
+        </label>
+        <div class="modal-sub" style="margin:4px 0 0;">SVM EdTech isn't GST-registered yet — leave this off until you are.</div>
+      </div>
+      <div class="grid-2" id="invoiceGstFields" style="display:none;">
+        <div class="field">
+          <label for="fInvoiceGstin">GSTIN</label>
+          <input type="text" id="fInvoiceGstin" placeholder="e.g. 22AAAAA0000A1Z5">
+        </div>
+        <div class="field">
+          <label for="fInvoiceGstRate">GST Rate (%)</label>
+          <input type="number" id="fInvoiceGstRate" min="0" max="28" step="0.01" placeholder="e.g. 18">
+        </div>
+      </div>
+      <div class="field" id="invoiceTotalRow" style="display:none;">
+        <label>Total (incl. GST)</label>
+        <div id="invoiceTotalDisplay" style="font-weight:600; font-size:1.05em;">₹0.00</div>
+      </div>
       <div class="field">
         <label for="fInvoiceNotes">Notes</label>
         <textarea id="fInvoiceNotes"></textarea>
@@ -583,6 +624,54 @@
         <div class="right">
           <button type="button" class="btn btn-light" id="btnCancelInvoice">Cancel</button>
           <button type="submit" class="btn btn-accent" id="btnSaveInvoice">Save</button>
+        </div>
+      </div>
+    </form>
+  </div>
+</div>
+
+<!-- Add / Edit Expense Modal -->
+<div class="modal-overlay" id="expenseModalOverlay">
+  <div class="modal">
+    <h3 id="expenseModalTitle">Add Expense</h3>
+    <div class="modal-sub">A running cost of SVM EdTech itself — hosting, domains, tools, and the like.</div>
+    <form id="expenseForm">
+      <div class="field">
+        <label for="fExpenseDescription">Description</label>
+        <input type="text" id="fExpenseDescription" placeholder="e.g. Render — vendor dashboard hosting" required>
+      </div>
+      <div class="grid-2">
+        <div class="field">
+          <label for="fExpenseCategory">Category</label>
+          <select id="fExpenseCategory">
+            <option value="Hosting">Hosting</option>
+            <option value="Domains">Domains</option>
+            <option value="Software & Tools">Software & Tools</option>
+            <option value="Marketing">Marketing</option>
+            <option value="Other">Other</option>
+          </select>
+        </div>
+        <div class="field">
+          <label for="fExpenseAmount">Amount (₹)</label>
+          <input type="number" id="fExpenseAmount" min="0.01" step="0.01" required>
+        </div>
+      </div>
+      <div class="field">
+        <label for="fExpenseDate">Date</label>
+        <input type="date" id="fExpenseDate">
+      </div>
+      <div class="field">
+        <label for="fExpenseNotes">Notes</label>
+        <textarea id="fExpenseNotes"></textarea>
+      </div>
+      <div class="modal-error" id="expenseModalError"></div>
+      <div class="modal-actions">
+        <div>
+          <button type="button" class="btn btn-danger" id="btnDeleteExpense" style="display:none;">Delete</button>
+        </div>
+        <div class="right">
+          <button type="button" class="btn btn-light" id="btnCancelExpense">Cancel</button>
+          <button type="submit" class="btn btn-accent" id="btnSaveExpense">Save</button>
         </div>
       </div>
     </form>
@@ -797,22 +886,28 @@ $('#btnLogout').addEventListener('click', async () => {
 let schoolsCache = [];
 let invoicesCache = [];
 let queriesCache = [];
+let expensesCache = [];
 let meCache = null;
 
 async function loadAll() {
-  const [me, summary, schools, activity, billingSummary, invoices, queries] = await Promise.all([
+  const [me, summary, schools, activity, billingSummary, invoices, queries, acctSummary, expenses] = await Promise.all([
     api('/api/me'), api('/api/summary'), api('/api/schools'), api('/api/activity'),
     api('/api/billing/summary'), api('/api/invoices'), api('/api/queries'),
+    api('/api/accounting/summary'), api('/api/expenses'),
   ]);
   meCache = me;
   $('#whoAmI').textContent = 'Signed in as ' + (me.name || me.username);
   schoolsCache = schools;
   invoicesCache = invoices;
   queriesCache = queries;
+  expensesCache = expenses;
   renderSummary(summary);
   renderSchoolsTable(schools);
   renderActivity(activity);
   renderBillingCards(billingSummary);
+  renderAccountingCards(acctSummary);
+  renderAcctTrend(acctSummary.monthly);
+  renderExpensesTable();
   populateSchoolSelects();
   renderInvoicesTable();
   renderQueriesTable();
@@ -955,6 +1050,72 @@ function renderBillingCards(s) {
       <div class="label">${c.label}</div>
     </div>
   `).join('');
+}
+
+function renderAccountingCards(s) {
+  const cards = [
+    { label: 'Income Collected (all time)', value: fmtMoney(s.incomeCollected), cls: 'accent-good' },
+    { label: 'Expenses (all time)', value: fmtMoney(s.expensesTotal), cls: 'accent-bad' },
+    { label: 'Net Cash Position', value: fmtMoney(s.netCashPosition), cls: s.netCashPosition >= 0 ? 'accent-good' : 'accent-bad' },
+  ];
+  $('#accountingCards').innerHTML = cards.map(c => `
+    <div class="card ${c.cls}">
+      <div class="num">${c.value}</div>
+      <div class="label">${c.label}</div>
+    </div>
+  `).join('');
+}
+
+function renderAcctTrend(monthly) {
+  const wrap = $('#acctTrendWrap');
+  if (!monthly || !monthly.length) { wrap.innerHTML = '<div class="empty-state">No data yet.</div>'; return; }
+  const max = Math.max(1, ...monthly.map(m => Math.max(m.income, m.expenses)));
+  const monthLabel = (m) => new Date(m + '-02').toLocaleDateString('en-IN', { month: 'short', year: '2-digit' });
+  wrap.innerHTML = `
+    <div style="padding:16px 20px; display:flex; flex-direction:column; gap:10px;">
+      ${monthly.map(m => `
+        <div style="display:grid; grid-template-columns:64px 1fr 90px; align-items:center; gap:10px; font-size:0.86em;">
+          <div style="color:var(--ink-soft);">${esc(monthLabel(m.month))}</div>
+          <div style="display:flex; flex-direction:column; gap:3px;">
+            <div style="background:#EEF0FB; border-radius:4px; height:8px; position:relative; overflow:hidden;">
+              <div style="width:${Math.round((m.income / max) * 100)}%; background:var(--good); height:100%; border-radius:4px;"></div>
+            </div>
+            <div style="background:#EEF0FB; border-radius:4px; height:8px; position:relative; overflow:hidden;">
+              <div style="width:${Math.round((m.expenses / max) * 100)}%; background:var(--bad); height:100%; border-radius:4px;"></div>
+            </div>
+          </div>
+          <div style="text-align:right; font-variant-numeric:tabular-nums; color:${m.net >= 0 ? 'var(--good)' : 'var(--bad)'};">${fmtMoney(m.net)}</div>
+        </div>
+      `).join('')}
+      <div style="display:flex; gap:16px; font-size:0.8em; color:var(--ink-soft); margin-top:4px;">
+        <span><span style="display:inline-block; width:8px; height:8px; border-radius:2px; background:var(--good); margin-right:5px;"></span>Income</span>
+        <span><span style="display:inline-block; width:8px; height:8px; border-radius:2px; background:var(--bad); margin-right:5px;"></span>Expenses</span>
+        <span style="margin-left:auto;">Net →</span>
+      </div>
+    </div>
+  `;
+}
+
+function renderExpensesTable() {
+  const wrap = $('#expensesTableWrap');
+  if (!expensesCache.length) { wrap.innerHTML = '<div class="empty-state">No expenses logged yet.</div>'; return; }
+  wrap.innerHTML = `
+    <table>
+      <thead><tr><th>Date</th><th>Description</th><th>Category</th><th>Amount</th><th>Actions</th></tr></thead>
+      <tbody>
+        ${expensesCache.map(e => `
+          <tr>
+            <td>${e.expenseDate ? String(e.expenseDate).slice(0, 10) : '—'}</td>
+            <td>${esc(e.description)}</td>
+            <td>${esc(e.category || '—')}</td>
+            <td>${fmtMoney(e.amount)}</td>
+            <td><button class="btn btn-light btn-sm" data-action="edit-expense" data-id="${e.id}">Edit</button></td>
+          </tr>
+        `).join('')}
+      </tbody>
+    </table>
+  `;
+  wrap.querySelectorAll('[data-action="edit-expense"]').forEach(btn => btn.addEventListener('click', () => openEditExpenseModal(btn.dataset.id)));
 }
 
 function billingLabel(s) {
@@ -1360,13 +1521,14 @@ function renderInvoicesTable() {
   }
   wrap.innerHTML = `
     <table>
-      <thead><tr><th>School</th><th>Description</th><th>Amount</th><th>Status</th><th>Due Date</th><th>Actions</th></tr></thead>
+      <thead><tr><th>Invoice #</th><th>School</th><th>Description</th><th>Amount</th><th>Status</th><th>Due Date</th><th>Actions</th></tr></thead>
       <tbody>
         ${rows.map(i => `
           <tr>
+            <td style="font-variant-numeric:tabular-nums; color:var(--ink-soft);">${esc(i.invoiceNumber || '—')}</td>
             <td class="school-name">${esc(schoolName(i.schoolId))}</td>
             <td>${esc(i.description || '—')}</td>
-            <td class="billing-amount">${fmtMoney(i.amount)}</td>
+            <td class="billing-amount">${fmtMoney(i.totalAmount != null ? i.totalAmount : i.amount)}${i.gstApplicable ? ' <span style="font-size:0.78em; color:var(--ink-soft);">(incl. GST)</span>' : ''}</td>
             <td><span class="badge badge-${i.effectiveStatus}">${titleCase(i.effectiveStatus)}</span></td>
             <td>${i.dueDate ? new Date(i.dueDate).toLocaleDateString() : '—'}</td>
             <td>
@@ -1400,6 +1562,20 @@ $('#fltInvoiceStatus').addEventListener('change', renderInvoicesTable);
 /* ---------- Billing: add / edit invoice modal ---------- */
 let editingInvoiceId = null;
 
+function updateInvoiceGstUi() {
+  const on = $('#fInvoiceGstApplicable').checked;
+  $('#invoiceGstFields').style.display = on ? 'grid' : 'none';
+  $('#invoiceTotalRow').style.display = on ? 'block' : 'none';
+  const amount = Number($('#fInvoiceAmount').value) || 0;
+  const rate = Number($('#fInvoiceGstRate').value) || 0;
+  const total = on ? amount + Math.round(amount * (rate / 100) * 100) / 100 : amount;
+  $('#invoiceTotalDisplay').textContent = fmtMoney(Math.round(total * 100) / 100);
+}
+['#fInvoiceGstApplicable', '#fInvoiceGstRate', '#fInvoiceAmount'].forEach(sel => {
+  $(sel).addEventListener('input', updateInvoiceGstUi);
+  $(sel).addEventListener('change', updateInvoiceGstUi);
+});
+
 function openAddInvoiceModal() {
   editingInvoiceId = null;
   $('#invoiceModalTitle').textContent = 'Add Invoice';
@@ -1408,6 +1584,7 @@ function openAddInvoiceModal() {
   if (schoolsCache.length) $('#fInvoiceSchool').value = schoolsCache[0].id;
   $('#btnDeleteInvoice').style.display = 'none';
   $('#invoiceModalError').style.display = 'none';
+  updateInvoiceGstUi();
   $('#invoiceModalOverlay').classList.add('open');
 }
 
@@ -1415,15 +1592,19 @@ function openEditInvoiceModal(id) {
   const inv = invoicesCache.find(x => x.id === id);
   if (!inv) return;
   editingInvoiceId = id;
-  $('#invoiceModalTitle').textContent = 'Edit Invoice';
+  $('#invoiceModalTitle').textContent = 'Edit Invoice — ' + (inv.invoiceNumber || '');
   $('#fInvoiceSchool').value = inv.schoolId;
   $('#fInvoiceDescription').value = inv.description || '';
   $('#fInvoiceAmount').value = inv.amount;
   $('#fInvoiceDueDate').value = inv.dueDate ? String(inv.dueDate).slice(0, 10) : '';
   $('#fInvoiceStatus').value = inv.status;
   $('#fInvoiceNotes').value = inv.notes || '';
+  $('#fInvoiceGstApplicable').checked = !!inv.gstApplicable;
+  $('#fInvoiceGstin').value = inv.gstin || '';
+  $('#fInvoiceGstRate').value = inv.gstRate != null ? inv.gstRate : '';
   $('#btnDeleteInvoice').style.display = 'inline-block';
   $('#invoiceModalError').style.display = 'none';
+  updateInvoiceGstUi();
   $('#invoiceModalOverlay').classList.add('open');
 }
 
@@ -1434,6 +1615,7 @@ $('#invoiceForm').addEventListener('submit', async (e) => {
   e.preventDefault();
   const errEl = $('#invoiceModalError');
   errEl.style.display = 'none';
+  const gstApplicable = $('#fInvoiceGstApplicable').checked;
   const payload = {
     schoolId: $('#fInvoiceSchool').value,
     description: $('#fInvoiceDescription').value,
@@ -1441,6 +1623,9 @@ $('#invoiceForm').addEventListener('submit', async (e) => {
     dueDate: $('#fInvoiceDueDate').value || null,
     status: $('#fInvoiceStatus').value,
     notes: $('#fInvoiceNotes').value,
+    gstApplicable,
+    gstin: gstApplicable ? $('#fInvoiceGstin').value : null,
+    gstRate: gstApplicable ? ($('#fInvoiceGstRate').value || null) : null,
   };
   try {
     if (editingInvoiceId) {
@@ -1465,6 +1650,90 @@ $('#btnDeleteInvoice').addEventListener('click', async () => {
     await api('/api/invoices/' + editingInvoiceId, { method: 'DELETE' });
     showToast('Invoice deleted.');
     $('#invoiceModalOverlay').classList.remove('open');
+    await loadAll();
+  } catch (err) {
+    showToast('Could not delete: ' + err.message);
+  }
+});
+
+/* ---------- Billing: generate recurring invoices ---------- */
+$('#btnGenerateInvoices').addEventListener('click', async () => {
+  const period = new Date().toISOString().slice(0, 7);
+  if (!confirm(`Generate this month's (${period}) invoices for every school on a monthly or annual plan that hasn't been billed for it yet?`)) return;
+  try {
+    const res = await api('/api/invoices/generate', { method: 'POST', body: { period } });
+    showToast(`Generated ${res.created.length} invoice${res.created.length === 1 ? '' : 's'}` + (res.skipped.length ? `, skipped ${res.skipped.length} (already billed or not due).` : '.'));
+    await loadAll();
+  } catch (err) {
+    showToast('Could not generate invoices: ' + err.message);
+  }
+});
+
+/* ---------- Accounting: expenses table + add/edit/delete ---------- */
+let editingExpenseId = null;
+
+function openAddExpenseModal() {
+  editingExpenseId = null;
+  $('#expenseModalTitle').textContent = 'Add Expense';
+  $('#expenseForm').reset();
+  $('#fExpenseDate').value = new Date().toISOString().slice(0, 10);
+  $('#btnDeleteExpense').style.display = 'none';
+  $('#expenseModalError').style.display = 'none';
+  $('#expenseModalOverlay').classList.add('open');
+}
+
+function openEditExpenseModal(id) {
+  const exp = expensesCache.find(x => x.id === id);
+  if (!exp) return;
+  editingExpenseId = id;
+  $('#expenseModalTitle').textContent = 'Edit Expense';
+  $('#fExpenseDescription').value = exp.description || '';
+  $('#fExpenseCategory').value = exp.category || 'Other';
+  $('#fExpenseAmount').value = exp.amount;
+  $('#fExpenseDate').value = exp.expenseDate ? String(exp.expenseDate).slice(0, 10) : '';
+  $('#fExpenseNotes').value = exp.notes || '';
+  $('#btnDeleteExpense').style.display = 'inline-block';
+  $('#expenseModalError').style.display = 'none';
+  $('#expenseModalOverlay').classList.add('open');
+}
+
+$('#btnAddExpense').addEventListener('click', openAddExpenseModal);
+$('#btnCancelExpense').addEventListener('click', () => $('#expenseModalOverlay').classList.remove('open'));
+
+$('#expenseForm').addEventListener('submit', async (e) => {
+  e.preventDefault();
+  const errEl = $('#expenseModalError');
+  errEl.style.display = 'none';
+  const payload = {
+    description: $('#fExpenseDescription').value,
+    category: $('#fExpenseCategory').value,
+    amount: $('#fExpenseAmount').value,
+    expenseDate: $('#fExpenseDate').value || null,
+    notes: $('#fExpenseNotes').value,
+  };
+  try {
+    if (editingExpenseId) {
+      await api('/api/expenses/' + editingExpenseId, { method: 'PUT', body: payload });
+      showToast('Expense updated.');
+    } else {
+      await api('/api/expenses', { method: 'POST', body: payload });
+      showToast('Expense added.');
+    }
+    $('#expenseModalOverlay').classList.remove('open');
+    await loadAll();
+  } catch (err) {
+    errEl.textContent = err.message;
+    errEl.style.display = 'block';
+  }
+});
+
+$('#btnDeleteExpense').addEventListener('click', async () => {
+  if (!editingExpenseId) return;
+  if (!confirm('Delete this expense? This cannot be undone.')) return;
+  try {
+    await api('/api/expenses/' + editingExpenseId, { method: 'DELETE' });
+    showToast('Expense deleted.');
+    $('#expenseModalOverlay').classList.remove('open');
     await loadAll();
   } catch (err) {
     showToast('Could not delete: ' + err.message);
