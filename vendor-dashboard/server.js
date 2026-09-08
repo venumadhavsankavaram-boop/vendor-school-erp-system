@@ -60,6 +60,35 @@ async function renderApi(path, opts = {}) {
   return data;
 }
 
+// ---------- Each school's own ERP (public enquiries, read-only) ----------
+// A visitor's admission/contact enquiry on a school's public website is
+// stored in THAT SCHOOL'S OWN database (admission_inquiries), never here —
+// this dashboard has no database of its own for it. This calls that
+// school's ERP directly, authenticated with that school's own api_key (the
+// same shared secret already used for reporting and Support Login), so
+// enquiries are read live and can never drift out of sync with the school's
+// own records.
+async function schoolErpApi(school, apiPath) {
+  if (!school.erp_url) {
+    const err = new Error('This school has no ERP URL on file yet — add one from Edit School.');
+    err.code = 'ERP_NOT_CONFIGURED';
+    throw err;
+  }
+  const base = String(school.erp_url).replace(/\/+$/, '');
+  const res = await fetch(base + apiPath, {
+    headers: { 'X-Vendor-Api-Key': school.api_key, Accept: 'application/json' },
+  });
+  const text = await res.text();
+  let data;
+  try { data = text ? JSON.parse(text) : null; } catch { data = text; }
+  if (!res.ok) {
+    const err = new Error((data && data.error) || `That school's ERP returned an error (${res.status})`);
+    err.status = res.status;
+    throw err;
+  }
+  return data;
+}
+
 // ---------- Schema ----------
 async function ensureSchema() {
   await sql`
@@ -500,7 +529,7 @@ app.post('/api/schools', async (req, res) => {
       VALUES (
         ${id}, ${String(name).trim()}, ${erpUrl || null}, ${websiteUrl || null}, ${status || 'temporary'}, ${notes || null}, ${apiKey}, ${onboardedDate || null},
         ${billingPlan || null}, ${billingAmount != null && billingAmount !== '' ? Number(billingAmount) : null}, ${billingCycle || null},
-        ${contactName || null}, ${contactEmail || null}, ${contactPhone || null}, ${renderServiceId || null}
+        ${contactName || null}, ${contactEmail || null}, ${contactPhone || null}, ${renderServiceId ? String(renderServiceId).trim() : null}
       )
     `;
     const rows = await sql`SELECT * FROM schools WHERE id = ${id}`;
@@ -536,7 +565,7 @@ app.put('/api/schools/:id', async (req, res) => {
         contact_name = ${contactName != null ? contactName : cur.contact_name},
         contact_email = ${contactEmail != null ? contactEmail : cur.contact_email},
         contact_phone = ${contactPhone != null ? contactPhone : cur.contact_phone},
-        render_service_id = ${renderServiceId != null ? (renderServiceId || null) : cur.render_service_id}
+        render_service_id = ${renderServiceId != null ? (String(renderServiceId).trim() || null) : cur.render_service_id}
       WHERE id = ${id}
     `;
     const rows = await sql`SELECT * FROM schools WHERE id = ${id}`;
@@ -1009,6 +1038,30 @@ app.post('/api/schools/:id/deploys/:deployId/rollback', async (req, res) => {
     console.error('rollback error:', err);
     if (err.code === 'RENDER_NOT_CONFIGURED') return res.status(400).json({ error: err.message });
     return res.status(502).json({ error: "Render couldn't start that rollback (" + err.message + ") — you can always redeploy that same commit from that service's own page on Render instead." });
+  }
+});
+
+// ---------- Public enquiries (from a school's own website) ----------
+// Read-only, live view of a school's admission_inquiries — nothing is
+// copied or cached here, so a school's own ERP is always the single source
+// of truth. ?date=YYYY-MM-DD filters to enquiries submitted on that date;
+// omit it to see everything (most recent first).
+app.get('/api/schools/:id/inquiries', async (req, res) => {
+  try {
+    const rows = await sql`SELECT * FROM schools WHERE id = ${req.params.id}`;
+    if (!rows.length) return res.status(404).json({ error: 'School not found.' });
+    const school = rows[0];
+    const list = await schoolErpApi(school, '/api/vendor/admission-inquiries');
+    let inquiries = Array.isArray(list) ? list : [];
+    const date = req.query.date;
+    if (date) inquiries = inquiries.filter(q => q.submittedDate === date);
+    return res.status(200).json(inquiries);
+  } catch (err) {
+    console.error('list inquiries error:', err);
+    if (err.code === 'ERP_NOT_CONFIGURED') return res.status(400).json({ error: err.message });
+    if (err.status === 401) return res.status(400).json({ error: "This school's ERP rejected the vendor key — its VENDOR_API_KEY env var may not match this school's API key yet." });
+    if (err.status === 404) return res.status(400).json({ error: "This school's ERP doesn't support enquiry sharing yet — it needs the small update that adds the /api/vendor/admission-inquiries route, then a redeploy." });
+    return res.status(502).json({ error: "Could not reach this school's ERP — " + err.message });
   }
 });
 

@@ -126,6 +126,13 @@
   .deploy-row:last-child{border-bottom:none;}
   .deploy-row .info b{display:block; font-size:0.86rem;}
   .deploy-row .info span{font-size:0.76rem; color:var(--ink-soft); font-family:monospace;}
+  .enquiry-row{display:flex; align-items:flex-start; justify-content:space-between; gap:12px; padding:12px 0; border-bottom:1px solid var(--border);}
+  .enquiry-row:last-child{border-bottom:none;}
+  .enquiry-row .info b{display:block; font-size:0.86rem;}
+  .enquiry-row .info .meta{font-size:0.76rem; color:var(--ink-soft); display:block; margin-top:2px;}
+  .enquiry-row .info .notes{font-size:0.78rem; color:var(--ink-soft); margin-top:6px; display:block;}
+  .enquiry-date-group{font-size:0.72rem; text-transform:uppercase; letter-spacing:0.04em; color:var(--ink-soft); font-weight:700; padding:14px 0 4px; border-bottom:1px solid var(--border); margin-bottom:2px;}
+  .enquiry-date-group:first-child{padding-top:0;}
   .guardrail-finding{border-radius:8px; padding:9px 12px; margin-bottom:8px; font-size:0.82rem;}
   .guardrail-finding.critical{background:#FDEBEF; color:#A3123A;}
   .guardrail-finding.warning{background:#FFF3DE; color:#8A5D0A;}
@@ -451,6 +458,26 @@
     <div class="modal-actions">
       <div></div>
       <div class="right"><button type="button" class="btn btn-light" id="btnCloseDeploys">Close</button></div>
+    </div>
+  </div>
+</div>
+
+<!-- Enquiries Modal -->
+<div class="modal-overlay" id="enquiriesModalOverlay">
+  <div class="modal" style="width:min(680px, 100%);">
+    <h3 id="enquiriesModalTitle">Enquiries</h3>
+    <div class="modal-sub">Admission &amp; contact enquiries submitted through this school's own public website — read live from that school's ERP, grouped by the date they came in. Nothing here is stored on this dashboard.</div>
+    <div style="display:flex; gap:10px; align-items:flex-end; margin:4px 0 6px;">
+      <div class="field" style="flex:1; margin-bottom:0;">
+        <label for="fEnquiryDate">Jump to a date</label>
+        <input type="date" id="fEnquiryDate">
+      </div>
+      <button type="button" class="btn btn-light" id="btnClearEnquiryDate">All dates</button>
+    </div>
+    <div id="enquiriesListWrap" style="margin:14px 0 8px; max-height:400px; overflow-y:auto;"></div>
+    <div class="modal-actions">
+      <div></div>
+      <div class="right"><button type="button" class="btn btn-light" id="btnCloseEnquiries">Close</button></div>
     </div>
   </div>
 </div>
@@ -975,6 +1002,7 @@ function renderSchoolsTable(schools) {
                 <button class="btn btn-light btn-sm" data-action="errors" data-id="${s.id}">Errors</button>
                 ${s.erpUrl ? `<button class="btn btn-light btn-sm" data-action="support-login" data-id="${s.id}">Support Login</button>` : ''}
                 <button class="btn btn-light btn-sm" data-action="deploys" data-id="${s.id}">Deploys</button>
+                ${s.erpUrl ? `<button class="btn btn-light btn-sm" data-action="enquiries" data-id="${s.id}">Enquiries</button>` : ''}
               </div>
             </td>
           </tr>
@@ -993,6 +1021,9 @@ function renderSchoolsTable(schools) {
   });
   wrap.querySelectorAll('[data-action="deploys"]').forEach(btn => {
     btn.addEventListener('click', () => openDeploysModal(btn.dataset.id));
+  });
+  wrap.querySelectorAll('[data-action="enquiries"]').forEach(btn => {
+    btn.addEventListener('click', () => openEnquiriesModal(btn.dataset.id));
   });
 }
 
@@ -1091,6 +1122,85 @@ $('#btnScanGuardrail').addEventListener('click', async () => {
   }
 });
 
+/* ---------- Public Enquiries (from a school's own website), by date ---------- */
+let enquiriesSchoolId = null;
+
+function openEnquiriesModal(id) {
+  const s = schoolsCache.find(x => x.id === id);
+  if (!s) return;
+  enquiriesSchoolId = id;
+  $('#enquiriesModalTitle').textContent = 'Enquiries — ' + s.name;
+  $('#fEnquiryDate').value = '';
+  $('#enquiriesModalOverlay').classList.add('open');
+  loadEnquiries();
+}
+
+function formatEnquiryDateGroup(dateStr) {
+  if (!dateStr) return 'Date not given';
+  const d = new Date(dateStr + 'T00:00:00');
+  if (isNaN(d.getTime())) return esc(dateStr);
+  return d.toLocaleDateString('en-IN', { weekday: 'long', day: 'numeric', month: 'long', year: 'numeric' });
+}
+
+async function loadEnquiries() {
+  if (!enquiriesSchoolId) return;
+  const date = $('#fEnquiryDate').value;
+  $('#enquiriesListWrap').innerHTML = '<div class="empty-state">Loading…</div>';
+  try {
+    const qs = date ? ('?date=' + encodeURIComponent(date)) : '';
+    const list = await api('/api/schools/' + enquiriesSchoolId + '/inquiries' + qs);
+    renderEnquiriesList(list, !date);
+  } catch (err) {
+    $('#enquiriesListWrap').innerHTML = `<div class="empty-state">${esc(err.message)}</div>`;
+  }
+}
+
+function renderEnquiryRow(q) {
+  const metaParts = [];
+  if (q.applyingGrade) metaParts.push('Applying for Grade ' + esc(q.applyingGrade));
+  if (q.parentPhone) metaParts.push(esc(q.parentPhone));
+  if (q.parentEmail) metaParts.push(esc(q.parentEmail));
+  return `
+    <div class="enquiry-row">
+      <div class="info">
+        <b>${esc(q.parentName || '(no name given)')}${q.studentName ? ' — for ' + esc(q.studentName) : ''}</b>
+        ${metaParts.length ? `<span class="meta">${metaParts.join(' · ')}</span>` : ''}
+        ${q.notes ? `<span class="notes">${esc(q.notes)}</span>` : ''}
+      </div>
+      ${q.status ? `<span class="badge badge-${esc(q.status)}">${esc(q.status)}</span>` : ''}
+    </div>
+  `;
+}
+
+function renderEnquiriesList(list, groupByDate) {
+  const wrap = $('#enquiriesListWrap');
+  if (!list.length) {
+    wrap.innerHTML = '<div class="empty-state">No enquiries found for this date.</div>';
+    return;
+  }
+  if (!groupByDate) {
+    wrap.innerHTML = list.map(renderEnquiryRow).join('');
+    return;
+  }
+  // "All dates" view: grouped under a heading per submitted date, most
+  // recent date first — this is the actual date view, not just a flat list.
+  const groups = new Map();
+  list.forEach(q => {
+    const key = q.submittedDate || '(no date)';
+    if (!groups.has(key)) groups.set(key, []);
+    groups.get(key).push(q);
+  });
+  const orderedKeys = [...groups.keys()].sort((a, b) => (a < b ? 1 : a > b ? -1 : 0));
+  wrap.innerHTML = orderedKeys.map(key => `
+    <div class="enquiry-date-group">${formatEnquiryDateGroup(key === '(no date)' ? null : key)} · ${groups.get(key).length}</div>
+    ${groups.get(key).map(renderEnquiryRow).join('')}
+  `).join('');
+}
+
+$('#btnCloseEnquiries').addEventListener('click', () => $('#enquiriesModalOverlay').classList.remove('open'));
+$('#btnClearEnquiryDate').addEventListener('click', () => { $('#fEnquiryDate').value = ''; loadEnquiries(); });
+$('#fEnquiryDate').addEventListener('change', loadEnquiries);
+
 /* ---------- Add / Edit school modal ---------- */
 let editingSchoolId = null;
 
@@ -1150,7 +1260,7 @@ $('#schoolForm').addEventListener('submit', async (e) => {
     contactName: $('#fContactName').value,
     contactEmail: $('#fContactEmail').value,
     contactPhone: $('#fContactPhone').value,
-    renderServiceId: $('#fRenderServiceId').value,
+    renderServiceId: $('#fRenderServiceId').value.trim(),
     billingPlan: $('#fBillingPlan').value,
     billingCycle: $('#fBillingCycle').value,
     billingAmount: $('#fBillingAmount').value,
