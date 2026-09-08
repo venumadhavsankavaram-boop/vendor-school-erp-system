@@ -119,6 +119,17 @@
   .badge-in_progress{background:#FFF3DE; color:var(--warn);}
   .badge-resolved{background:#E4F7EE; color:var(--good);}
   .badge-closed{background:#F0F0F5; color:var(--ink-soft);}
+  .badge-deployed{background:#E7ECFB; color:#3D4FC4;}
+  .badge-type-customization{background:#FBEFFC; color:#9C36B5;}
+  .badge-type-support{background:#F0F0F5; color:var(--ink-soft);}
+  .deploy-row{display:flex; align-items:center; justify-content:space-between; gap:12px; padding:10px 0; border-bottom:1px solid var(--border);}
+  .deploy-row:last-child{border-bottom:none;}
+  .deploy-row .info b{display:block; font-size:0.86rem;}
+  .deploy-row .info span{font-size:0.76rem; color:var(--ink-soft); font-family:monospace;}
+  .guardrail-finding{border-radius:8px; padding:9px 12px; margin-bottom:8px; font-size:0.82rem;}
+  .guardrail-finding.critical{background:#FDEBEF; color:#A3123A;}
+  .guardrail-finding.warning{background:#FFF3DE; color:#8A5D0A;}
+  .guardrail-finding b{font-family:monospace; display:block; margin-bottom:2px;}
   .badge-priority-low{background:#F0F0F5; color:var(--ink-soft);}
   .badge-priority-normal{background:#EEF0FB; color:var(--accent);}
   .badge-priority-high{background:#FCE4EA; color:var(--bad);}
@@ -302,10 +313,16 @@
         </div>
         <div class="filter-bar">
           <select id="fltQuerySchool"><option value="">All schools</option></select>
+          <select id="fltQueryType">
+            <option value="">All types</option>
+            <option value="support">Support</option>
+            <option value="customization">Customization</option>
+          </select>
           <select id="fltQueryStatus">
             <option value="">All statuses</option>
             <option value="open">Open</option>
             <option value="in_progress">In Progress</option>
+            <option value="deployed">Deployed</option>
             <option value="resolved">Resolved</option>
             <option value="closed">Closed</option>
           </select>
@@ -364,6 +381,11 @@
         <label for="fContactEmail">Contact Email</label>
         <input type="email" id="fContactEmail">
       </div>
+      <div class="field">
+        <label for="fRenderServiceId">Render Service ID <span style="font-weight:400; color:var(--ink-soft);">(for Deploy history &amp; rollback)</span></label>
+        <input type="text" id="fRenderServiceId" placeholder="srv-xxxxxxxxxxxxxxxxxxxx" style="font-family:monospace;">
+        <div style="font-size:0.76rem; color:var(--ink-soft); margin-top:4px;">The id in that ERP or website's own Render dashboard URL — <span style="font-family:monospace;">dashboard.render.com/web/<b>srv-...</b></span>.</div>
+      </div>
       <hr style="border:none; border-top:1px solid var(--border); margin:16px 0;">
       <div class="grid-2">
         <div class="field">
@@ -407,6 +429,29 @@
         </div>
       </div>
     </form>
+  </div>
+</div>
+
+<!-- Deploys Modal -->
+<div class="modal-overlay" id="deploysModalOverlay">
+  <div class="modal" style="width:min(640px, 100%);">
+    <h3 id="deploysModalTitle">Deploys</h3>
+    <div class="modal-sub">Recent deploys for this school's service, straight from Render. Roll back to any earlier one in one click — this never touches the school's own data, only which version of the app is running.</div>
+    <div id="deploysListWrap" style="margin:14px 0 20px; max-height:320px; overflow-y:auto;"></div>
+
+    <hr style="border:none; border-top:1px solid var(--border); margin:8px 0 16px;">
+    <h3 style="font-size:1rem;">Pre-deploy safety check</h3>
+    <div class="modal-sub">Paste a diff or migration snippet before you push it — a quick scan for anything that could destroy existing data.</div>
+    <div class="field">
+      <textarea id="fGuardrailText" placeholder="Paste the changed lines here, e.g. an ALTER TABLE / migration snippet..." style="min-height:90px; font-family:monospace; font-size:0.82rem;"></textarea>
+    </div>
+    <button type="button" class="btn btn-light" id="btnScanGuardrail">Scan</button>
+    <div id="guardrailResult" style="margin-top:12px;"></div>
+
+    <div class="modal-actions">
+      <div></div>
+      <div class="right"><button type="button" class="btn btn-light" id="btnCloseDeploys">Close</button></div>
+    </div>
   </div>
 </div>
 
@@ -528,6 +573,13 @@
         <select id="fQuerySchool" required></select>
       </div>
       <div class="field">
+        <label for="fQueryType">Type</label>
+        <select id="fQueryType">
+          <option value="support">Support (something's wrong)</option>
+          <option value="customization">Customization (they're asking for a change)</option>
+        </select>
+      </div>
+      <div class="field">
         <label for="fQuerySubject">Subject</label>
         <input type="text" id="fQuerySubject" required>
       </div>
@@ -572,6 +624,7 @@
         <select id="fQueryThreadStatus">
           <option value="open">Open</option>
           <option value="in_progress">In Progress</option>
+          <option value="deployed">Deployed</option>
           <option value="resolved">Resolved</option>
           <option value="closed">Closed</option>
         </select>
@@ -921,6 +974,7 @@ function renderSchoolsTable(schools) {
                 <button class="btn btn-light btn-sm" data-action="edit" data-id="${s.id}">Edit</button>
                 <button class="btn btn-light btn-sm" data-action="errors" data-id="${s.id}">Errors</button>
                 ${s.erpUrl ? `<button class="btn btn-light btn-sm" data-action="support-login" data-id="${s.id}">Support Login</button>` : ''}
+                <button class="btn btn-light btn-sm" data-action="deploys" data-id="${s.id}">Deploys</button>
               </div>
             </td>
           </tr>
@@ -936,6 +990,9 @@ function renderSchoolsTable(schools) {
   });
   wrap.querySelectorAll('[data-action="support-login"]').forEach(btn => {
     btn.addEventListener('click', () => openSupportLogin(btn.dataset.id));
+  });
+  wrap.querySelectorAll('[data-action="deploys"]').forEach(btn => {
+    btn.addEventListener('click', () => openDeploysModal(btn.dataset.id));
   });
 }
 
@@ -953,6 +1010,86 @@ async function openSupportLogin(id) {
     showToast('Could not open support login: ' + err.message);
   }
 }
+
+/* ---------- Deploys: history + rollback + guardrail ---------- */
+let deploysSchoolId = null;
+
+async function openDeploysModal(id) {
+  const s = schoolsCache.find(x => x.id === id);
+  if (!s) return;
+  deploysSchoolId = id;
+  $('#deploysModalTitle').textContent = 'Deploys — ' + s.name;
+  $('#fGuardrailText').value = '';
+  $('#guardrailResult').innerHTML = '';
+  $('#deploysListWrap').innerHTML = '<div class="empty-state">Loading…</div>';
+  $('#deploysModalOverlay').classList.add('open');
+  try {
+    const deploys = await api('/api/schools/' + id + '/deploys');
+    renderDeploysList(deploys);
+  } catch (err) {
+    $('#deploysListWrap').innerHTML = `<div class="empty-state">${esc(err.message)}</div>`;
+  }
+}
+
+function renderDeploysList(deploys) {
+  const wrap = $('#deploysListWrap');
+  if (!deploys.length) {
+    wrap.innerHTML = '<div class="empty-state">No deploys found yet.</div>';
+    return;
+  }
+  wrap.innerHTML = deploys.map((d, i) => `
+    <div class="deploy-row">
+      <div class="info">
+        <b>${esc((d.commitMessage || '(no commit message)').split('\n')[0]).slice(0, 80)}</b>
+        <span>${(d.commitId || '').slice(0, 7)} · ${d.status}${d.trigger ? ' · ' + d.trigger : ''} · ${relativeTime(d.createdAt)}</span>
+      </div>
+      ${i === 0
+        ? `<span class="badge badge-resolved">Current</span>`
+        : `<button class="btn btn-light btn-sm" data-action="rollback" data-id="${d.id}">Roll back to this</button>`}
+    </div>
+  `).join('');
+  wrap.querySelectorAll('[data-action="rollback"]').forEach(btn => {
+    btn.addEventListener('click', () => rollbackDeploy(btn.dataset.id));
+  });
+}
+
+async function rollbackDeploy(deployId) {
+  if (!deploysSchoolId) return;
+  if (!confirm('Roll back to this deploy? This redeploys that earlier version of the app. It does not touch this school\'s data in any way.')) return;
+  try {
+    await api('/api/schools/' + deploysSchoolId + '/deploys/' + deployId + '/rollback', { method: 'POST' });
+    showToast('Rollback started — Render is redeploying that version now.');
+    const deploys = await api('/api/schools/' + deploysSchoolId + '/deploys');
+    renderDeploysList(deploys);
+  } catch (err) {
+    showToast('Could not roll back: ' + err.message);
+  }
+}
+
+$('#btnCloseDeploys').addEventListener('click', () => $('#deploysModalOverlay').classList.remove('open'));
+
+$('#btnScanGuardrail').addEventListener('click', async () => {
+  const text = $('#fGuardrailText').value;
+  const resultEl = $('#guardrailResult');
+  if (!text.trim()) { resultEl.innerHTML = '<div class="empty-state">Paste something to scan first.</div>'; return; }
+  resultEl.innerHTML = '<div class="empty-state">Scanning…</div>';
+  try {
+    const result = await api('/api/deploy-guardrail/scan', { method: 'POST', body: { text } });
+    if (!result.findings.length) {
+      resultEl.innerHTML = '<div class="guardrail-finding" style="background:#E4F7EE; color:#146C43;"><b>✓ Nothing risky found</b>No destructive patterns detected — still worth your own read-through.</div>';
+    } else {
+      resultEl.innerHTML =
+        `<div style="font-weight:600; margin-bottom:8px; color:${result.safe ? 'var(--warn)' : 'var(--bad)'};">${result.safe ? '⚠ Review before pushing' : '✕ Do not push as-is'}</div>` +
+        result.findings.map(f => `
+          <div class="guardrail-finding ${f.severity}">
+            <b>Line ${f.line}: ${esc(f.snippet)}</b>${esc(f.note)}
+          </div>
+        `).join('');
+    }
+  } catch (err) {
+    resultEl.innerHTML = `<div class="empty-state">${esc(err.message)}</div>`;
+  }
+});
 
 /* ---------- Add / Edit school modal ---------- */
 let editingSchoolId = null;
@@ -980,6 +1117,7 @@ function openEditModal(id) {
   $('#fContactName').value = s.contactName || '';
   $('#fContactEmail').value = s.contactEmail || '';
   $('#fContactPhone').value = s.contactPhone || '';
+  $('#fRenderServiceId').value = s.renderServiceId || '';
   $('#fBillingPlan').value = s.billingPlan || '';
   $('#fBillingCycle').value = s.billingCycle || '';
   $('#fBillingAmount').value = s.billingAmount != null ? s.billingAmount : '';
@@ -1012,6 +1150,7 @@ $('#schoolForm').addEventListener('submit', async (e) => {
     contactName: $('#fContactName').value,
     contactEmail: $('#fContactEmail').value,
     contactPhone: $('#fContactPhone').value,
+    renderServiceId: $('#fRenderServiceId').value,
     billingPlan: $('#fBillingPlan').value,
     billingCycle: $('#fBillingCycle').value,
     billingAmount: $('#fBillingAmount').value,
@@ -1226,7 +1365,8 @@ $('#btnDeleteInvoice').addEventListener('click', async () => {
 function filteredQueries() {
   const schoolId = $('#fltQuerySchool').value;
   const status = $('#fltQueryStatus').value;
-  return queriesCache.filter(q => (!schoolId || q.schoolId === schoolId) && (!status || q.status === status));
+  const type = $('#fltQueryType').value;
+  return queriesCache.filter(q => (!schoolId || q.schoolId === schoolId) && (!status || q.status === status) && (!type || (q.type || 'support') === type));
 }
 
 function renderQueriesTable() {
@@ -1238,11 +1378,12 @@ function renderQueriesTable() {
   }
   wrap.innerHTML = `
     <table>
-      <thead><tr><th>School</th><th>Subject</th><th>Priority</th><th>Status</th><th>Created</th><th>Actions</th></tr></thead>
+      <thead><tr><th>School</th><th>Type</th><th>Subject</th><th>Priority</th><th>Status</th><th>Created</th><th>Actions</th></tr></thead>
       <tbody>
         ${rows.map(q => `
           <tr>
             <td class="school-name">${esc(schoolName(q.schoolId))}</td>
+            <td><span class="badge badge-type-${q.type || 'support'}">${(q.type === 'customization') ? 'Customization' : 'Support'}</span></td>
             <td>${esc(q.subject)}</td>
             <td><span class="badge badge-priority-${q.priority}">${titleCase(q.priority)}</span></td>
             <td><span class="badge badge-${q.status}">${titleCase(q.status)}</span></td>
@@ -1258,10 +1399,12 @@ function renderQueriesTable() {
 
 $('#fltQuerySchool').addEventListener('change', renderQueriesTable);
 $('#fltQueryStatus').addEventListener('change', renderQueriesTable);
+$('#fltQueryType').addEventListener('change', renderQueriesTable);
 
 /* ---------- Support: add query modal ---------- */
 function openAddQueryModal() {
   $('#queryForm').reset();
+  $('#fQueryType').value = 'support';
   populateSchoolSelects();
   if (schoolsCache.length) $('#fQuerySchool').value = schoolsCache[0].id;
   $('#queryModalError').style.display = 'none';
@@ -1282,6 +1425,7 @@ $('#queryForm').addEventListener('submit', async (e) => {
         subject: $('#fQuerySubject').value,
         message: $('#fQueryMessage').value,
         priority: $('#fQueryPriority').value,
+        type: $('#fQueryType').value,
       },
     });
     showToast('Query logged.');

@@ -26,6 +26,40 @@ app.use(express.json({ limit: '2mb' }));
 
 const sql = neon(process.env.DATABASE_URL);
 
+// ---------- Render API (deploy history & rollback) ----------
+// Optional — only needed for the Deploys panel on a school's row. Create a
+// key at Render → Account Settings → API Keys, and set it here as
+// RENDER_API_KEY. This is called only to read/trigger deploys for a
+// school's own web service; it never has any path to that school's
+// database, which lives entirely in Neon and is untouched by this.
+const RENDER_API_KEY = process.env.RENDER_API_KEY;
+const RENDER_API_BASE = 'https://api.render.com/v1';
+async function renderApi(path, opts = {}) {
+  if (!RENDER_API_KEY) {
+    const err = new Error('RENDER_API_KEY is not set on this dashboard yet — add it under Environment on this service, then redeploy.');
+    err.code = 'RENDER_NOT_CONFIGURED';
+    throw err;
+  }
+  const res = await fetch(RENDER_API_BASE + path, {
+    ...opts,
+    headers: {
+      Authorization: `Bearer ${RENDER_API_KEY}`,
+      Accept: 'application/json',
+      ...(opts.body ? { 'Content-Type': 'application/json' } : {}),
+      ...(opts.headers || {}),
+    },
+  });
+  const text = await res.text();
+  let data;
+  try { data = text ? JSON.parse(text) : null; } catch { data = text; }
+  if (!res.ok) {
+    const err = new Error((data && (data.message || data.error)) || `Render API error (${res.status})`);
+    err.status = res.status;
+    throw err;
+  }
+  return data;
+}
+
 // ---------- Schema ----------
 async function ensureSchema() {
   await sql`
@@ -77,6 +111,10 @@ async function ensureSchema() {
   await sql`ALTER TABLE schools ADD COLUMN IF NOT EXISTS contact_name TEXT`;
   await sql`ALTER TABLE schools ADD COLUMN IF NOT EXISTS contact_email TEXT`;
   await sql`ALTER TABLE schools ADD COLUMN IF NOT EXISTS contact_phone TEXT`;
+  // The srv-... id of that school's Render web service — lets the dashboard
+  // pull deploy history and trigger a rollback via Render's own API. Never
+  // used to reach that school's database; deploys and data stay separate.
+  await sql`ALTER TABLE schools ADD COLUMN IF NOT EXISTS render_service_id TEXT`;
   await sql`
     CREATE TABLE IF NOT EXISTS school_errors (
       id TEXT PRIMARY KEY,
@@ -119,6 +157,10 @@ async function ensureSchema() {
     )
   `;
   await sql`CREATE INDEX IF NOT EXISTS idx_vendor_queries_school_id ON vendor_queries (school_id, created_at DESC)`;
+  // 'support' (a school reporting a problem) vs 'customization' (a school
+  // asking for a change) — same table, same status pipeline, just tagged so
+  // the Support tab can filter one from the other.
+  await sql`ALTER TABLE vendor_queries ADD COLUMN IF NOT EXISTS type TEXT NOT NULL DEFAULT 'support'`;
   await sql`
     CREATE TABLE IF NOT EXISTS vendor_support_logins (
       id TEXT PRIMARY KEY,
@@ -130,6 +172,23 @@ async function ensureSchema() {
     )
   `;
   await sql`CREATE INDEX IF NOT EXISTS idx_vendor_support_logins_school_id ON vendor_support_logins (school_id, created_at DESC)`;
+  // Every rollback triggered from here — which deploy, whose commit, who
+  // pulled the trigger — kept for the same accountability reason as
+  // vendor_support_logins above. This never touches the school's own
+  // database; it's a record of a Render API call, nothing more.
+  await sql`
+    CREATE TABLE IF NOT EXISTS vendor_deploy_actions (
+      id TEXT PRIMARY KEY,
+      school_id TEXT NOT NULL REFERENCES schools(id) ON DELETE CASCADE,
+      action TEXT NOT NULL,
+      target_commit TEXT,
+      target_message TEXT,
+      admin_id TEXT,
+      admin_name TEXT,
+      created_at TIMESTAMPTZ NOT NULL DEFAULT now()
+    )
+  `;
+  await sql`CREATE INDEX IF NOT EXISTS idx_vendor_deploy_actions_school_id ON vendor_deploy_actions (school_id, created_at DESC)`;
 }
 await ensureSchema();
 
@@ -402,6 +461,7 @@ function shapeSchool(row, errorCount24h) {
     contactName: row.contact_name,
     contactEmail: row.contact_email,
     contactPhone: row.contact_phone,
+    renderServiceId: row.render_service_id,
   };
 }
 
@@ -426,6 +486,7 @@ app.post('/api/schools', async (req, res) => {
     const {
       name, erpUrl, websiteUrl, status, notes, onboardedDate,
       billingPlan, billingAmount, billingCycle, contactName, contactEmail, contactPhone,
+      renderServiceId,
     } = req.body || {};
     if (!name || !String(name).trim()) return res.status(400).json({ error: 'School name is required.' });
     const id = 'sch_' + crypto.randomBytes(8).toString('hex');
@@ -433,12 +494,13 @@ app.post('/api/schools', async (req, res) => {
     await sql`
       INSERT INTO schools (
         id, name, erp_url, website_url, status, notes, api_key, onboarded_date,
-        billing_plan, billing_amount, billing_cycle, contact_name, contact_email, contact_phone
+        billing_plan, billing_amount, billing_cycle, contact_name, contact_email, contact_phone,
+        render_service_id
       )
       VALUES (
         ${id}, ${String(name).trim()}, ${erpUrl || null}, ${websiteUrl || null}, ${status || 'temporary'}, ${notes || null}, ${apiKey}, ${onboardedDate || null},
         ${billingPlan || null}, ${billingAmount != null && billingAmount !== '' ? Number(billingAmount) : null}, ${billingCycle || null},
-        ${contactName || null}, ${contactEmail || null}, ${contactPhone || null}
+        ${contactName || null}, ${contactEmail || null}, ${contactPhone || null}, ${renderServiceId || null}
       )
     `;
     const rows = await sql`SELECT * FROM schools WHERE id = ${id}`;
@@ -458,6 +520,7 @@ app.put('/api/schools/:id', async (req, res) => {
     const {
       name, erpUrl, websiteUrl, status, notes, onboardedDate,
       billingPlan, billingAmount, billingCycle, contactName, contactEmail, contactPhone,
+      renderServiceId,
     } = req.body || {};
     await sql`
       UPDATE schools SET
@@ -472,7 +535,8 @@ app.put('/api/schools/:id', async (req, res) => {
         billing_cycle = ${billingCycle != null ? billingCycle : cur.billing_cycle},
         contact_name = ${contactName != null ? contactName : cur.contact_name},
         contact_email = ${contactEmail != null ? contactEmail : cur.contact_email},
-        contact_phone = ${contactPhone != null ? contactPhone : cur.contact_phone}
+        contact_phone = ${contactPhone != null ? contactPhone : cur.contact_phone},
+        render_service_id = ${renderServiceId != null ? (renderServiceId || null) : cur.render_service_id}
       WHERE id = ${id}
     `;
     const rows = await sql`SELECT * FROM schools WHERE id = ${id}`;
@@ -716,6 +780,7 @@ function shapeQuery(row) {
     message: row.message,
     priority: row.priority,
     status: row.status,
+    type: row.type || 'support',
     source: row.source,
     replies: row.replies || [],
     createdAt: row.created_at,
@@ -726,7 +791,7 @@ function shapeQuery(row) {
 
 app.get('/api/queries', async (req, res) => {
   try {
-    const { schoolId, status } = req.query || {};
+    const { schoolId, status, type } = req.query || {};
     let rows;
     if (schoolId && status) {
       rows = await sql`SELECT * FROM vendor_queries WHERE school_id = ${schoolId} AND status = ${status} ORDER BY created_at DESC`;
@@ -737,6 +802,10 @@ app.get('/api/queries', async (req, res) => {
     } else {
       rows = await sql`SELECT * FROM vendor_queries ORDER BY created_at DESC`;
     }
+    // Filtered in JS rather than added as another SQL branch above — the
+    // query volume a single vendor deals with never justifies the extra
+    // combinatorial WHERE clauses.
+    if (type) rows = rows.filter(r => (r.type || 'support') === type);
     return res.status(200).json(rows.map(shapeQuery));
   } catch (err) {
     console.error('list queries error:', err);
@@ -746,15 +815,15 @@ app.get('/api/queries', async (req, res) => {
 
 app.post('/api/queries', async (req, res) => {
   try {
-    const { schoolId, subject, message, priority } = req.body || {};
+    const { schoolId, subject, message, priority, type } = req.body || {};
     if (!schoolId) return res.status(400).json({ error: 'schoolId is required.' });
     if (!subject || !String(subject).trim()) return res.status(400).json({ error: 'Subject is required.' });
     const school = await sql`SELECT id FROM schools WHERE id = ${schoolId}`;
     if (!school.length) return res.status(404).json({ error: 'School not found.' });
     const id = 'qry_' + crypto.randomBytes(8).toString('hex');
     await sql`
-      INSERT INTO vendor_queries (id, school_id, subject, message, priority, source)
-      VALUES (${id}, ${schoolId}, ${String(subject).trim()}, ${message || null}, ${priority || 'normal'}, 'manual')
+      INSERT INTO vendor_queries (id, school_id, subject, message, priority, source, type)
+      VALUES (${id}, ${schoolId}, ${String(subject).trim()}, ${message || null}, ${priority || 'normal'}, 'manual', ${type === 'customization' ? 'customization' : 'support'})
     `;
     const rows = await sql`SELECT * FROM vendor_queries WHERE id = ${id}`;
     return res.status(201).json(shapeQuery(rows[0]));
@@ -770,7 +839,7 @@ app.put('/api/queries/:id', async (req, res) => {
     const existing = await sql`SELECT * FROM vendor_queries WHERE id = ${id}`;
     if (!existing.length) return res.status(404).json({ error: 'Query not found.' });
     const cur = existing[0];
-    const { status, priority, replyMessage } = req.body || {};
+    const { status, priority, replyMessage, type } = req.body || {};
     let replies = Array.isArray(cur.replies) ? cur.replies.slice() : [];
     if (replyMessage && String(replyMessage).trim()) {
       replies.push({
@@ -787,6 +856,7 @@ app.put('/api/queries/:id', async (req, res) => {
       UPDATE vendor_queries SET
         status = ${finalStatus},
         priority = ${priority != null ? priority : cur.priority},
+        type = ${type === 'support' || type === 'customization' ? type : cur.type},
         replies = ${JSON.stringify(replies)},
         updated_at = now(),
         resolved_at = ${resolvedAt}
@@ -874,6 +944,100 @@ app.post('/api/schools/:id/support-login', async (req, res) => {
     return res.status(200).json({ url, expiresAt: new Date(payload.exp).toISOString() });
   } catch (err) {
     console.error('support login error:', err);
+    return res.status(500).json({ error: 'Something went wrong on the server.' });
+  }
+});
+
+// ---------- Deploy history & one-click rollback ----------
+// The safety net for a customization: see what's actually running on a
+// school's ERP or website, and undo the last deploy in one click if it
+// breaks something — entirely through Render's own API, so it can never
+// touch that school's database.
+app.get('/api/schools/:id/deploys', async (req, res) => {
+  try {
+    const rows = await sql`SELECT * FROM schools WHERE id = ${req.params.id}`;
+    if (!rows.length) return res.status(404).json({ error: 'School not found.' });
+    const school = rows[0];
+    if (!school.render_service_id) {
+      return res.status(400).json({ error: "This school has no Render Service ID on file yet — add one from Edit School (it's the srv-... id in that service's own Render dashboard URL)." });
+    }
+    const list = await renderApi(`/services/${encodeURIComponent(school.render_service_id)}/deploys?limit=15`);
+    const deploys = (Array.isArray(list) ? list : []).map(d => {
+      const deploy = (d && d.deploy) || d || {};
+      return {
+        id: deploy.id,
+        status: deploy.status,
+        trigger: deploy.trigger,
+        commitId: deploy.commit && deploy.commit.id,
+        commitMessage: deploy.commit && deploy.commit.message,
+        createdAt: deploy.createdAt,
+        finishedAt: deploy.finishedAt,
+      };
+    });
+    return res.status(200).json(deploys);
+  } catch (err) {
+    console.error('list deploys error:', err);
+    if (err.code === 'RENDER_NOT_CONFIGURED') return res.status(400).json({ error: err.message });
+    return res.status(502).json({ error: 'Could not reach Render — ' + err.message });
+  }
+});
+
+app.post('/api/schools/:id/deploys/:deployId/rollback', async (req, res) => {
+  try {
+    const rows = await sql`SELECT * FROM schools WHERE id = ${req.params.id}`;
+    if (!rows.length) return res.status(404).json({ error: 'School not found.' });
+    const school = rows[0];
+    if (!school.render_service_id) {
+      return res.status(400).json({ error: 'This school has no Render Service ID on file yet — add one from Edit School first.' });
+    }
+    const targetRaw = await renderApi(`/services/${encodeURIComponent(school.render_service_id)}/deploys/${encodeURIComponent(req.params.deployId)}`);
+    const target = (targetRaw && targetRaw.deploy) || targetRaw || {};
+    const commitId = target.commit && target.commit.id;
+    if (!commitId) return res.status(400).json({ error: 'Could not find a commit on that deploy to roll back to.' });
+    const createdRaw = await renderApi(`/services/${encodeURIComponent(school.render_service_id)}/deploys`, {
+      method: 'POST',
+      body: JSON.stringify({ commitId }),
+    });
+    const created = (createdRaw && createdRaw.deploy) || createdRaw || {};
+    const auditId = 'dpa_' + crypto.randomBytes(8).toString('hex');
+    await sql`
+      INSERT INTO vendor_deploy_actions (id, school_id, action, target_commit, target_message, admin_id, admin_name)
+      VALUES (${auditId}, ${school.id}, 'rollback', ${commitId}, ${(target.commit && target.commit.message) || null}, ${req.authAdmin.id}, ${req.authAdmin.name})
+    `;
+    return res.status(200).json({ ok: true, newDeploy: created });
+  } catch (err) {
+    console.error('rollback error:', err);
+    if (err.code === 'RENDER_NOT_CONFIGURED') return res.status(400).json({ error: err.message });
+    return res.status(502).json({ error: "Render couldn't start that rollback (" + err.message + ") — you can always redeploy that same commit from that service's own page on Render instead." });
+  }
+});
+
+// ---------- Pre-deploy safety guardrail ----------
+// Paste a diff or migration snippet before you push it — a plain text scan
+// for SQL patterns that could destroy a school's existing data. Reads only
+// the text you paste; it never opens a connection to any school's database.
+const GUARDRAIL_PATTERNS = [
+  { severity: 'critical', re: /\bDROP\s+(TABLE|COLUMN|DATABASE|SCHEMA)\b/i, note: 'DROP permanently deletes a table, column, database or schema — and everything in it.' },
+  { severity: 'critical', re: /\bTRUNCATE\b/i, note: 'TRUNCATE wipes every row in a table.' },
+  { severity: 'critical', re: /\bDELETE\s+FROM\s+\w+\s*(;|$)/im, note: 'DELETE FROM with no WHERE clause removes every row in the table.' },
+  { severity: 'warning', re: /\bALTER\s+TABLE\b[^;]*\bALTER\s+COLUMN\b[^;]*\bTYPE\b/i, note: "Changing a column's type can silently truncate or reject existing values." },
+  { severity: 'warning', re: /\bRENAME\s+(COLUMN|TABLE)\b/i, note: 'Renaming breaks any code that still refers to the old name — check every reference first.' },
+  { severity: 'warning', re: /\bDROP\s+NOT\s+NULL\b|\bSET\s+NOT\s+NULL\b/i, note: 'Changing a NOT NULL constraint can reject existing rows or silently allow gaps.' },
+];
+app.post('/api/deploy-guardrail/scan', async (req, res) => {
+  try {
+    const text = String((req.body && req.body.text) || '');
+    const lines = text.split('\n');
+    const findings = [];
+    lines.forEach((line, i) => {
+      GUARDRAIL_PATTERNS.forEach(p => {
+        if (p.re.test(line)) findings.push({ severity: p.severity, line: i + 1, snippet: line.trim().slice(0, 200), note: p.note });
+      });
+    });
+    const safe = !findings.some(f => f.severity === 'critical');
+    return res.status(200).json({ safe, findings });
+  } catch (err) {
+    console.error('guardrail scan error:', err);
     return res.status(500).json({ error: 'Something went wrong on the server.' });
   }
 });
