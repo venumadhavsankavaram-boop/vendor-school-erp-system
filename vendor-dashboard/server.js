@@ -917,12 +917,13 @@ app.post('/api/ingest/query', async (req, res) => {
   try {
     const school = await authenticateSchool(req, res);
     if (!school) return;
-    const { subject, message, priority } = req.body || {};
+    const { subject, message, priority, type } = req.body || {};
     if (!subject || !String(subject).trim()) return res.status(400).json({ error: 'subject is required.' });
     const id = 'qry_' + crypto.randomBytes(8).toString('hex');
+    const safeType = ['support', 'customization'].includes(type) ? type : 'support';
     await sql`
-      INSERT INTO vendor_queries (id, school_id, subject, message, priority, source)
-      VALUES (${id}, ${school.id}, ${String(subject).trim().slice(0, 300)}, ${String(message || '').slice(0, 4000)}, ${priority || 'normal'}, 'api')
+      INSERT INTO vendor_queries (id, school_id, subject, message, priority, source, type)
+      VALUES (${id}, ${school.id}, ${String(subject).trim().slice(0, 300)}, ${String(message || '').slice(0, 4000)}, ${priority || 'normal'}, 'api', ${safeType})
     `;
     return res.status(201).json({ ok: true });
   } catch (err) {
