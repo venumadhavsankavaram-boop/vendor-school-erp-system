@@ -22,7 +22,32 @@ const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
 
 const app = express();
+
+// The SVM EdTech marketing site (a separate static site, its own domain) —
+// where a prospective school requests a demo or asks a question — posts
+// straight to /api/public/leads with zero login of any kind, the same shape
+// of carve-out the school ERP template uses for its public admission-inquiry
+// form. Small body-limit parser registered first so only this one path gets
+// capped (a plain contact form never needs anywhere near 2mb); body-parser
+// marks the body as already-parsed, so the main parser below skips it.
+app.use('/api/public/leads', express.json({ limit: '20kb' }));
 app.use(express.json({ limit: '2mb' }));
+
+// Per-deployment value — set MARKETING_SITE_ORIGIN to the marketing site's
+// live URL (e.g. https://svm-edtech.onrender.com). Left unset, this endpoint
+// simply gets no CORS header — the marketing site's calls to it fail closed
+// (safe default) until it's configured, rather than silently allowing the
+// wrong (or no) origin.
+const MARKETING_SITE_ORIGIN = process.env.MARKETING_SITE_ORIGIN || '';
+app.use((req, res, next) => {
+  if (req.path === '/api/public/leads' && MARKETING_SITE_ORIGIN) {
+    res.header('Access-Control-Allow-Origin', MARKETING_SITE_ORIGIN);
+    res.header('Access-Control-Allow-Methods', 'POST, OPTIONS');
+    res.header('Access-Control-Allow-Headers', 'Content-Type');
+  }
+  if (req.method === 'OPTIONS') return res.sendStatus(204);
+  next();
+});
 
 const sql = neon(process.env.DATABASE_URL);
 
@@ -235,6 +260,26 @@ async function ensureSchema() {
   // asking for a change) — same table, same status pipeline, just tagged so
   // the Support tab can filter one from the other.
   await sql`ALTER TABLE vendor_queries ADD COLUMN IF NOT EXISTS type TEXT NOT NULL DEFAULT 'support'`;
+  // Demo requests / general enquiries from the public SVM EdTech marketing
+  // site (see /api/public/leads below) — deliberately a separate table from
+  // vendor_queries: a query always belongs to an already-onboarded school
+  // (school_id is NOT NULL there), while a lead is a prospective school that
+  // doesn't exist in `schools` yet, so there's nothing to foreign-key to.
+  await sql`
+    CREATE TABLE IF NOT EXISTS vendor_leads (
+      id TEXT PRIMARY KEY,
+      school_name TEXT,
+      contact_name TEXT NOT NULL,
+      email TEXT,
+      phone TEXT,
+      message TEXT,
+      status TEXT NOT NULL DEFAULT 'new',
+      source TEXT NOT NULL DEFAULT 'website',
+      created_at TIMESTAMPTZ NOT NULL DEFAULT now(),
+      updated_at TIMESTAMPTZ NOT NULL DEFAULT now()
+    )
+  `;
+  await sql`CREATE INDEX IF NOT EXISTS idx_vendor_leads_status ON vendor_leads (status, created_at DESC)`;
   await sql`
     CREATE TABLE IF NOT EXISTS vendor_support_logins (
       id TEXT PRIMARY KEY,
@@ -383,6 +428,10 @@ const PUBLIC_API_ROUTES = [
   { path: '/api/ingest/heartbeat', methods: ['POST'] },
   { path: '/api/ingest/error', methods: ['POST'] },
   { path: '/api/ingest/query', methods: ['POST'] },
+  // The marketing site's demo-request/enquiry form — CORS-scoped above to
+  // MARKETING_SITE_ORIGIN, not authenticated by anything else (there's no
+  // school or vendor session to check; anyone can ask about the product).
+  { path: '/api/public/leads', methods: ['POST'] },
 ];
 function isPublicApiRoute(req) {
   return PUBLIC_API_ROUTES.some(r => r.path === req.path && r.methods.includes(req.method));
@@ -870,11 +919,13 @@ app.get('/api/summary', async (req, res) => {
     const online = schools.filter(s => heartbeatStatus(s.last_heartbeat_at) === 'online').length;
     const errRows = await sql`SELECT COUNT(*)::int AS cnt FROM school_errors WHERE occurred_at > now() - interval '24 hours'`;
     const openQueryRows = await sql`SELECT COUNT(*)::int AS cnt FROM vendor_queries WHERE status IN ('open', 'in_progress')`;
+    const newLeadRows = await sql`SELECT COUNT(*)::int AS cnt FROM vendor_leads WHERE status = 'new'`;
     return res.status(200).json({
       total, temporary, permanent, online,
       offline: total - online,
       errors24h: errRows[0].cnt,
       openQueries: openQueryRows[0].cnt,
+      newLeads: newLeadRows[0].cnt,
     });
   } catch (err) {
     console.error('summary error:', err);
@@ -1390,6 +1441,94 @@ app.post('/api/ingest/query', async (req, res) => {
     return res.status(201).json({ ok: true });
   } catch (err) {
     console.error('query ingest error:', err);
+    return res.status(500).json({ error: 'Something went wrong on the server.' });
+  }
+});
+
+// ---------- Leads (demo requests / enquiries from the marketing site) ----------
+function shapeLead(row) {
+  return {
+    id: row.id,
+    schoolName: row.school_name,
+    contactName: row.contact_name,
+    email: row.email,
+    phone: row.phone,
+    message: row.message,
+    status: row.status,
+    source: row.source,
+    createdAt: row.created_at,
+    updatedAt: row.updated_at,
+  };
+}
+
+// Submitted straight from the public marketing site, no login of any kind —
+// see the CORS/body-limit setup near the top of this file. Deliberately
+// asks for very little (just enough to call someone back) so the form stays
+// low-friction for someone who's only curious.
+app.post('/api/public/leads', async (req, res) => {
+  try {
+    const { schoolName, contactName, email, phone, message } = req.body || {};
+    if (!contactName || !String(contactName).trim()) {
+      return res.status(400).json({ error: 'Your name is required.' });
+    }
+    if ((!email || !String(email).trim()) && (!phone || !String(phone).trim())) {
+      return res.status(400).json({ error: 'An email or phone number is required so we can get back to you.' });
+    }
+    const id = 'lead_' + crypto.randomBytes(8).toString('hex');
+    await sql`
+      INSERT INTO vendor_leads (id, school_name, contact_name, email, phone, message, source)
+      VALUES (
+        ${id}, ${schoolName ? String(schoolName).trim().slice(0, 200) : null},
+        ${String(contactName).trim().slice(0, 200)},
+        ${email ? String(email).trim().slice(0, 200) : null},
+        ${phone ? String(phone).trim().slice(0, 40) : null},
+        ${message ? String(message).trim().slice(0, 4000) : null},
+        'website'
+      )
+    `;
+    return res.status(201).json({ ok: true });
+  } catch (err) {
+    console.error('create lead error:', err);
+    return res.status(500).json({ error: 'Something went wrong on the server.' });
+  }
+});
+
+app.get('/api/leads', async (req, res) => {
+  try {
+    const { status } = req.query || {};
+    const rows = status
+      ? await sql`SELECT * FROM vendor_leads WHERE status = ${status} ORDER BY created_at DESC`
+      : await sql`SELECT * FROM vendor_leads ORDER BY created_at DESC`;
+    return res.status(200).json(rows.map(shapeLead));
+  } catch (err) {
+    console.error('list leads error:', err);
+    return res.status(500).json({ error: 'Something went wrong on the server.' });
+  }
+});
+
+app.put('/api/leads/:id', async (req, res) => {
+  try {
+    const { id } = req.params;
+    const existing = await sql`SELECT * FROM vendor_leads WHERE id = ${id}`;
+    if (!existing.length) return res.status(404).json({ error: 'Lead not found.' });
+    const { status } = req.body || {};
+    const validStatuses = ['new', 'contacted', 'closed'];
+    const finalStatus = validStatuses.includes(status) ? status : existing[0].status;
+    await sql`UPDATE vendor_leads SET status = ${finalStatus}, updated_at = now() WHERE id = ${id}`;
+    const rows = await sql`SELECT * FROM vendor_leads WHERE id = ${id}`;
+    return res.status(200).json(shapeLead(rows[0]));
+  } catch (err) {
+    console.error('update lead error:', err);
+    return res.status(500).json({ error: 'Something went wrong on the server.' });
+  }
+});
+
+app.delete('/api/leads/:id', async (req, res) => {
+  try {
+    await sql`DELETE FROM vendor_leads WHERE id = ${req.params.id}`;
+    return res.status(200).json({ ok: true });
+  } catch (err) {
+    console.error('delete lead error:', err);
     return res.status(500).json({ error: 'Something went wrong on the server.' });
   }
 });
