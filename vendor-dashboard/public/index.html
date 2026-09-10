@@ -119,6 +119,8 @@
   .badge-in_progress{background:#FFF3DE; color:var(--warn);}
   .badge-resolved{background:#E4F7EE; color:var(--good);}
   .badge-closed{background:#F0F0F5; color:var(--ink-soft);}
+  .badge-new{background:#EEF0FB; color:var(--accent);}
+  .badge-contacted{background:#FFF3DE; color:var(--warn);}
   .badge-deployed{background:#E7ECFB; color:#3D4FC4;}
   .badge-type-customization{background:#FBEFFC; color:#9C36B5;}
   .badge-type-support{background:#F0F0F5; color:var(--ink-soft);}
@@ -266,6 +268,7 @@
     <button class="tab-btn" data-tab="billing">Billing</button>
     <button class="tab-btn" data-tab="accounting">Accounting</button>
     <button class="tab-btn" data-tab="support">Support<span class="count-pill" id="supportCountPill" style="display:none;"></span></button>
+    <button class="tab-btn" data-tab="leads">Leads<span class="count-pill" id="leadsCountPill" style="display:none;"></span></button>
   </nav>
 
   <main>
@@ -355,6 +358,25 @@
           </select>
         </div>
         <div id="queriesTableWrap"></div>
+      </div>
+    </div>
+
+    <!-- ===================== Leads ===================== -->
+    <div class="tab-panel" id="tab-leads">
+      <div class="panel">
+        <div class="panel-head">
+          <h2>Leads</h2>
+        </div>
+        <div style="font-size:0.82rem; color:var(--ink-soft); margin:-8px 0 16px;">Demo requests and enquiries submitted through the SVM EdTech marketing site.</div>
+        <div class="filter-bar">
+          <select id="fltLeadStatus">
+            <option value="">All statuses</option>
+            <option value="new">New</option>
+            <option value="contacted">Contacted</option>
+            <option value="closed">Closed</option>
+          </select>
+        </div>
+        <div id="leadsTableWrap"></div>
       </div>
     </div>
 
@@ -966,13 +988,14 @@ let schoolsCache = [];
 let invoicesCache = [];
 let queriesCache = [];
 let expensesCache = [];
+let leadsCache = [];
 let meCache = null;
 
 async function loadAll() {
-  const [me, summary, schools, activity, billingSummary, invoices, queries, acctSummary, expenses, settings] = await Promise.all([
+  const [me, summary, schools, activity, billingSummary, invoices, queries, acctSummary, expenses, settings, leads] = await Promise.all([
     api('/api/me'), api('/api/summary'), api('/api/schools'), api('/api/activity'),
     api('/api/billing/summary'), api('/api/invoices'), api('/api/queries'),
-    api('/api/accounting/summary'), api('/api/expenses'), api('/api/settings'),
+    api('/api/accounting/summary'), api('/api/expenses'), api('/api/settings'), api('/api/leads'),
   ]);
   meCache = me;
   settingsCache = settings;
@@ -981,6 +1004,7 @@ async function loadAll() {
   invoicesCache = invoices;
   queriesCache = queries;
   expensesCache = expenses;
+  leadsCache = leads;
   renderSummary(summary);
   renderSchoolsTable(schools);
   renderActivity(activity);
@@ -991,7 +1015,9 @@ async function loadAll() {
   populateSchoolSelects();
   renderInvoicesTable();
   renderQueriesTable();
+  renderLeadsTable();
   updateSupportCountPill(summary.openQueries);
+  updateLeadsCountPill(summary.newLeads);
 }
 
 function populateSchoolSelects() {
@@ -1028,6 +1054,12 @@ function populateParentSchoolSelect(excludeId) {
 
 function updateSupportCountPill(n) {
   const pill = $('#supportCountPill');
+  if (n > 0) { pill.textContent = n; pill.style.display = 'inline-block'; }
+  else pill.style.display = 'none';
+}
+
+function updateLeadsCountPill(n) {
+  const pill = $('#leadsCountPill');
   if (n > 0) { pill.textContent = n; pill.style.display = 'inline-block'; }
   else pill.style.display = 'none';
 }
@@ -2046,6 +2078,63 @@ function renderQueriesTable() {
 $('#fltQuerySchool').addEventListener('change', renderQueriesTable);
 $('#fltQueryStatus').addEventListener('change', renderQueriesTable);
 $('#fltQueryType').addEventListener('change', renderQueriesTable);
+
+/* ---------- Leads: table + filter + status changes ---------- */
+function filteredLeads() {
+  const status = $('#fltLeadStatus').value;
+  return leadsCache.filter(l => !status || l.status === status);
+}
+
+function renderLeadsTable() {
+  const wrap = $('#leadsTableWrap');
+  const rows = filteredLeads();
+  if (!rows.length) {
+    wrap.innerHTML = '<div class="empty-state">No leads match these filters.</div>';
+    return;
+  }
+  wrap.innerHTML = `
+    <table>
+      <thead><tr><th>School</th><th>Contact</th><th>Reach</th><th>Message</th><th>Received</th><th>Status</th></tr></thead>
+      <tbody>
+        ${rows.map(l => `
+          <tr>
+            <td class="school-name">${l.schoolName ? esc(l.schoolName) : '<span style="color:var(--ink-soft);">—</span>'}</td>
+            <td>${esc(l.contactName)}</td>
+            <td>
+              ${l.email ? `<div><a href="mailto:${esc(l.email)}">${esc(l.email)}</a></div>` : ''}
+              ${l.phone ? `<div><a href="tel:${esc(l.phone)}">${esc(l.phone)}</a></div>` : ''}
+            </td>
+            <td style="max-width:280px; white-space:normal;" title="${l.message ? esc(l.message) : ''}">${l.message ? esc(l.message.length > 140 ? l.message.slice(0, 140) + '…' : l.message) : '<span style="color:var(--ink-soft);">—</span>'}</td>
+            <td>${relativeTime(l.createdAt)}</td>
+            <td>
+              <select class="lead-status-select" data-id="${l.id}" style="padding:4px 8px; border-radius:8px; border:1px solid var(--border); font-family:inherit; font-size:0.78rem;">
+                <option value="new" ${l.status === 'new' ? 'selected' : ''}>New</option>
+                <option value="contacted" ${l.status === 'contacted' ? 'selected' : ''}>Contacted</option>
+                <option value="closed" ${l.status === 'closed' ? 'selected' : ''}>Closed</option>
+              </select>
+            </td>
+          </tr>
+        `).join('')}
+      </tbody>
+    </table>
+  `;
+  wrap.querySelectorAll('.lead-status-select').forEach(sel => {
+    sel.addEventListener('change', async () => {
+      try {
+        const updated = await api('/api/leads/' + sel.dataset.id, { method: 'PUT', body: { status: sel.value } });
+        const idx = leadsCache.findIndex(l => l.id === updated.id);
+        if (idx > -1) leadsCache[idx] = updated;
+        renderLeadsTable();
+        const summary = await api('/api/summary');
+        updateLeadsCountPill(summary.newLeads);
+      } catch (err) {
+        showToast('Could not update lead: ' + err.message);
+      }
+    });
+  });
+}
+
+$('#fltLeadStatus').addEventListener('change', renderLeadsTable);
 
 /* ---------- Support: add query modal ---------- */
 function openAddQueryModal() {
