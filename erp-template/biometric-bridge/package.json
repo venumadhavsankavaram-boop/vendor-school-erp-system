@@ -1,0 +1,17 @@
+{
+  "name": "biometric-bridge",
+  "version": "1.0.0",
+  "private": true,
+  "description": "Runs on a PC on the same local network as a school's biometric attendance device(s), and forwards new punches to that school's ERP. See README.md before doing anything else.",
+  "type": "commonjs",
+  "main": "sync.js",
+  "scripts": {
+    "start": "node sync.js",
+    "once": "node sync.js --once",
+    "test-connection": "node sync.js --test"
+  },
+  "dependencies": {
+    "dotenv": "^16.4.5",
+    "node-zklib": "^1.3.0"
+  }
+}
