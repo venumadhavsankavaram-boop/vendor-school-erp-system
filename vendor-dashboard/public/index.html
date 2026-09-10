@@ -371,6 +371,13 @@
         <label for="fSchoolName">School Name</label>
         <input type="text" id="fSchoolName" required>
       </div>
+      <div class="field">
+        <label for="fParentSchool">Branch Of <span style="font-weight:400; color:var(--ink-soft);">(optional)</span></label>
+        <select id="fParentSchool">
+          <option value="">— This is a main branch —</option>
+        </select>
+        <div style="font-size:0.76rem; color:var(--ink-soft); margin-top:4px;">Groups this as a sub-branch of an existing main-branch school for organizing, billing and reporting here. It still gets its own separate ERP deployment and database, set up like any school.</div>
+      </div>
       <div class="grid-2">
         <div class="field">
           <label for="fErpUrl">ERP URL</label>
@@ -414,6 +421,27 @@
         <div style="font-size:0.76rem; color:var(--ink-soft); margin-top:4px;">The id in that ERP or website's own Render dashboard URL — <span style="font-family:monospace;">dashboard.render.com/web/<b>srv-...</b></span>.</div>
       </div>
       <hr style="border:none; border-top:1px solid var(--border); margin:16px 0;">
+      <div class="field">
+        <label for="fPlanType">Plan</label>
+        <select id="fPlanType">
+          <option value="">— Not set —</option>
+          <option value="erp_selected_modules">ERP — Selected Modules</option>
+          <option value="erp_all_modules">ERP — All Modules</option>
+          <option value="erp_all_modules_website">ERP — All Modules + Website</option>
+        </select>
+        <div style="font-size:0.76rem; color:var(--ink-soft); margin-top:4px;">Picking a plan fills in Billing Plan and (for the two "All Modules" plans) Billing Amount below from your saved defaults — both stay editable for a custom deal.</div>
+      </div>
+      <div class="field" id="planModulesField">
+        <label>Modules Included</label>
+        <div style="display:flex; flex-direction:column; gap:6px;">
+          <label style="display:flex; align-items:center; gap:8px; font-weight:400; font-size:0.86rem;"><input type="checkbox" class="plan-module-cb" value="fees"> Fees &amp; Payments</label>
+          <label style="display:flex; align-items:center; gap:8px; font-weight:400; font-size:0.86rem;"><input type="checkbox" class="plan-module-cb" value="attendance"> Attendance</label>
+          <label style="display:flex; align-items:center; gap:8px; font-weight:400; font-size:0.86rem;"><input type="checkbox" class="plan-module-cb" value="exams"> Exams &amp; Marks</label>
+          <label style="display:flex; align-items:center; gap:8px; font-weight:400; font-size:0.86rem;"><input type="checkbox" class="plan-module-cb" value="transport_library"> Transport, Library &amp; Other Extras</label>
+        </div>
+        <div style="font-size:0.76rem; color:var(--ink-soft); margin-top:4px;">For an "All Modules" plan every module is included automatically. Only pick individual modules here for "Selected Modules".</div>
+      </div>
+      <hr style="border:none; border-top:1px solid var(--border); margin:16px 0;">
       <div class="grid-2">
         <div class="field">
           <label for="fBillingPlan">Billing Plan</label>
@@ -445,10 +473,17 @@
           <button type="button" class="btn btn-light btn-sm" id="btnRegenKey">Regenerate</button>
         </div>
       </div>
+      <div class="field" id="accessStatusField" style="display:none;">
+        <label>Access</label>
+        <div id="accessStatusBanner" style="border-radius:8px; padding:10px 12px; font-size:0.82rem; background:#fde8ee; color:#a80d5d; border:1px solid #f5c2d8;"></div>
+        <div style="font-size:0.76rem; color:var(--ink-soft); margin-top:6px;">A manual cutoff for non-payment — this is never automatic. While suspended, only that school's own Admin can sign in to its ERP; Teachers, Staff, Parents and Students see a message to contact the school office. Nothing about the school's data is touched.</div>
+      </div>
       <div class="modal-error" id="schoolModalError"></div>
       <div class="modal-actions">
-        <div>
+        <div style="display:flex; gap:8px; flex-wrap:wrap;">
           <button type="button" class="btn btn-danger" id="btnDeleteSchool" style="display:none;">Delete School</button>
+          <button type="button" class="btn btn-danger" id="btnSuspendAccess" style="display:none;">Suspend Access</button>
+          <button type="button" class="btn btn-accent" id="btnRestoreAccess" style="display:none;">Restore Access</button>
         </div>
         <div class="right">
           <button type="button" class="btn btn-light" id="btnCancelSchool">Cancel</button>
@@ -571,6 +606,20 @@
         <div class="field">
           <label for="fContactWhatsapp">WhatsApp Number</label>
           <input type="tel" id="fContactWhatsapp" placeholder="e.g. 9701424177">
+        </div>
+      </div>
+      <div class="field" style="margin-top:16px;">
+        <label style="font-weight:600;">Plan Pricing</label>
+        <div class="modal-sub" style="margin:2px 0 12px;">Default Billing Amount the Add/Edit School modal fills in when a school is put on one of the "All Modules" plans. "Selected Modules" plans are always priced by hand, since the mix varies per school.</div>
+      </div>
+      <div class="grid-2">
+        <div class="field">
+          <label for="fPriceAllModules">ERP — All Modules (₹)</label>
+          <input type="number" id="fPriceAllModules" min="0" step="0.01" placeholder="e.g. 8000">
+        </div>
+        <div class="field">
+          <label for="fPriceAllModulesWebsite">ERP — All Modules + Website (₹)</label>
+          <input type="number" id="fPriceAllModulesWebsite" min="0" step="0.01" placeholder="e.g. 12000">
         </div>
       </div>
       <div class="modal-error" id="settingsError"></div>
@@ -818,13 +867,13 @@ const $$ = sel => Array.from(document.querySelectorAll(sel));
 
 async function api(path, opts = {}) {
   const res = await fetch(path, {
-    method: opts.method || 'GET',
-    headers: { 'Content-Type': 'application/json' },
+    method: opts.method || "GET",
+    headers: { "Content-Type": "application/json" },
     body: opts.body ? JSON.stringify(opts.body) : undefined,
   });
   let data = null;
   try { data = await res.json(); } catch (e) {}
-  if (!res.ok) throw new Error((data && data.error) || ('Request failed (' + res.status + ')'));
+  if (!res.ok) throw new Error((data && data.error) || ("Request failed (" + res.status + ")"));
   return data;
 }
 
@@ -920,12 +969,13 @@ let expensesCache = [];
 let meCache = null;
 
 async function loadAll() {
-  const [me, summary, schools, activity, billingSummary, invoices, queries, acctSummary, expenses] = await Promise.all([
+  const [me, summary, schools, activity, billingSummary, invoices, queries, acctSummary, expenses, settings] = await Promise.all([
     api('/api/me'), api('/api/summary'), api('/api/schools'), api('/api/activity'),
     api('/api/billing/summary'), api('/api/invoices'), api('/api/queries'),
-    api('/api/accounting/summary'), api('/api/expenses'),
+    api('/api/accounting/summary'), api('/api/expenses'), api('/api/settings'),
   ]);
   meCache = me;
+  settingsCache = settings;
   $('#whoAmI').textContent = 'Signed in as ' + (me.name || me.username);
   schoolsCache = schools;
   invoicesCache = invoices;
@@ -960,6 +1010,20 @@ function populateSchoolSelects() {
 function schoolName(id) {
   const s = schoolsCache.find(x => x.id === id);
   return s ? s.name : '(unknown school)';
+}
+
+// Populates the "Branch Of" picker in the Add/Edit School modal with only
+// main-branch schools (no parent of their own) — a sub-branch can't itself
+// have sub-branches, so it's never offered as a parent choice. excludeId
+// keeps a school being edited out of its own picker.
+function populateParentSchoolSelect(excludeId) {
+  const sel = $('#fParentSchool');
+  const hasChildren = excludeId && schoolsCache.some(s => s.parentSchoolId === excludeId);
+  const mainBranches = schoolsCache.filter(s => !s.parentSchoolId && s.id !== excludeId);
+  sel.innerHTML = '<option value="">— This is a main branch —</option>' +
+    mainBranches.map(s => `<option value="${s.id}">${esc(s.name)}</option>`).join('');
+  sel.disabled = !!hasChildren;
+  sel.title = hasChildren ? "This school already has its own sub-branches, so it can't be made a sub-branch itself." : '';
 }
 
 function updateSupportCountPill(n) {
@@ -1012,6 +1076,8 @@ async function openAccountModal() {
     $('#fContactEmail').value = settingsCache.contactEmail || '';
     $('#fContactPhone').value = settingsCache.contactPhone || '';
     $('#fContactWhatsapp').value = settingsCache.contactWhatsapp || '';
+    $('#fPriceAllModules').value = settingsCache.defaultPriceErpAllModules != null ? settingsCache.defaultPriceErpAllModules : '';
+    $('#fPriceAllModulesWebsite').value = settingsCache.defaultPriceErpAllModulesWebsite != null ? settingsCache.defaultPriceErpAllModulesWebsite : '';
   } catch (err) {
     // Non-fatal — the rest of the Account modal still works.
   }
@@ -1072,6 +1138,8 @@ $('#settingsForm').addEventListener('submit', async (e) => {
         contactEmail: $('#fContactEmail').value,
         contactPhone: $('#fContactPhone').value,
         contactWhatsapp: $('#fContactWhatsapp').value,
+        defaultPriceErpAllModules: $('#fPriceAllModules').value,
+        defaultPriceErpAllModulesWebsite: $('#fPriceAllModulesWebsite').value,
       },
     });
     showToast('Business contact details saved.');
@@ -1185,12 +1253,37 @@ function billingLabel(s) {
   return `<span class="billing-amount">${fmtMoney(s.billingAmount)}${esc(cycleLabel)}</span>`;
 }
 
+// Orders schools so each main branch is immediately followed by its own
+// sub-branches (grouped, not flat) — purely a display grouping, since every
+// branch is still its own independent ERP + database row in this table.
+function groupSchoolsByBranch(schools) {
+  const byParent = new Map();
+  schools.forEach(s => {
+    const key = s.parentSchoolId || null;
+    if (!byParent.has(key)) byParent.set(key, []);
+    byParent.get(key).push(s);
+  });
+  const knownIds = new Set(schools.map(s => s.id));
+  const ordered = [];
+  (byParent.get(null) || []).forEach(main => {
+    ordered.push({ school: main, isSub: false });
+    (byParent.get(main.id) || []).forEach(sub => ordered.push({ school: sub, isSub: true }));
+  });
+  // Edge case: a sub-branch whose parent isn't in this list (e.g. the parent
+  // was deleted through some other path) — show it rather than drop it.
+  schools.forEach(s => {
+    if (s.parentSchoolId && !knownIds.has(s.parentSchoolId)) ordered.push({ school: s, isSub: false });
+  });
+  return ordered;
+}
+
 function renderSchoolsTable(schools) {
   const wrap = $('#schoolsTableWrap');
   if (!schools.length) {
     wrap.innerHTML = '<div class="empty-state">No schools onboarded yet. Click "+ Add School" to add your first one.</div>';
     return;
   }
+  const rows = groupSchoolsByBranch(schools);
   wrap.innerHTML = `
     <table>
       <thead>
@@ -1205,11 +1298,13 @@ function renderSchoolsTable(schools) {
         </tr>
       </thead>
       <tbody>
-        ${schools.map(s => `
+        ${rows.map(({ school: s, isSub }) => `
           <tr>
             <td>
-              <div class="school-name">${esc(s.name)}</div>
-              ${s.notes ? `<div class="school-notes">${esc(s.notes)}</div>` : ''}
+              <div class="school-name" style="${isSub ? 'padding-left:20px;' : ''}">${isSub ? '↳ ' : ''}${esc(s.name)}${s.accessSuspended ? ' <span class="badge" style="background:#fde8ee; color:#a80d5d;">Access Suspended</span>' : ''}</div>
+              ${isSub ? `<div class="school-notes" style="padding-left:20px;">Branch of ${esc(schoolName(s.parentSchoolId))}</div>` : ''}
+              ${s.planType ? `<div class="school-notes" style="${isSub ? 'padding-left:20px;' : ''}">${esc(PLAN_TYPE_LABELS[s.planType] || s.planType)}${s.planType === 'erp_selected_modules' && s.planModules && s.planModules.length ? ' · ' + s.planModules.map(m => esc(PLAN_MODULE_LABELS[m] || m)).join(', ') : ''}</div>` : ''}
+              ${s.notes ? `<div class="school-notes" style="${isSub ? 'padding-left:20px;' : ''}">${esc(s.notes)}</div>` : ''}
             </td>
             <td><span class="badge badge-${s.status}">${s.status === 'permanent' ? 'Permanent' : 'Temporary'}</span></td>
             <td>
@@ -1423,15 +1518,88 @@ $('#btnCloseEnquiries').addEventListener('click', () => $('#enquiriesModalOverla
 $('#btnClearEnquiryDate').addEventListener('click', () => { $('#fEnquiryDate').value = ''; loadEnquiries(); });
 $('#fEnquiryDate').addEventListener('change', loadEnquiries);
 
+/* ---------- Plan / Modules (billing basis — see Plan Pricing in Account) ---------- */
+const PLAN_TYPE_LABELS = {
+  erp_selected_modules: 'ERP — Selected Modules',
+  erp_all_modules: 'ERP — All Modules',
+  erp_all_modules_website: 'ERP — All Modules + Website',
+};
+const PLAN_MODULE_LABELS = {
+  fees: 'Fees & Payments', attendance: 'Attendance', exams: 'Exams & Marks', transport_library: 'Transport, Library & Other Extras',
+};
+function getSelectedPlanModules() {
+  return Array.from(document.querySelectorAll('.plan-module-cb:checked')).map(cb => cb.value);
+}
+function setPlanModules(keys) {
+  document.querySelectorAll('.plan-module-cb').forEach(cb => { cb.checked = (keys || []).includes(cb.value); });
+}
+// "All Modules" plans always include everything — lock the checkboxes on
+// (rather than hiding them) so it's visually obvious nothing was left out.
+function updatePlanModulesUI() {
+  const planType = $('#fPlanType').value;
+  const allModules = planType === 'erp_all_modules' || planType === 'erp_all_modules_website';
+  document.querySelectorAll('.plan-module-cb').forEach(cb => {
+    if (allModules) cb.checked = true;
+    cb.disabled = allModules;
+  });
+}
+// Only runs when the vendor actively changes the Plan dropdown (never on
+// modal open) — fills in a starting Billing Plan/Amount that's still fully
+// editable, so it never silently overwrites a custom deal already saved.
+function applyPlanDefaults() {
+  const planType = $('#fPlanType').value;
+  if (!planType) return;
+  $('#fBillingPlan').value = PLAN_TYPE_LABELS[planType] || '';
+  if (planType === 'erp_all_modules' && settingsCache.defaultPriceErpAllModules != null) {
+    $('#fBillingAmount').value = settingsCache.defaultPriceErpAllModules;
+  } else if (planType === 'erp_all_modules_website' && settingsCache.defaultPriceErpAllModulesWebsite != null) {
+    $('#fBillingAmount').value = settingsCache.defaultPriceErpAllModulesWebsite;
+  }
+  // erp_selected_modules: no fixed default — a custom mix is priced by hand.
+}
+$('#fPlanType').addEventListener('change', () => {
+  updatePlanModulesUI();
+  applyPlanDefaults();
+});
+
 /* ---------- Add / Edit school modal ---------- */
 let editingSchoolId = null;
+
+// Shows/hides the Access banner and the Suspend/Restore buttons for the
+// school currently open in the Add/Edit modal. Called on open, and again
+// right after a suspend/restore call so the modal reflects it immediately
+// without needing to close and reopen it.
+function renderAccessStatusUI(s) {
+  const field = $('#accessStatusField');
+  const banner = $('#accessStatusBanner');
+  const suspendBtn = $('#btnSuspendAccess');
+  const restoreBtn = $('#btnRestoreAccess');
+  if (!s) { field.style.display = 'none'; suspendBtn.style.display = 'none'; restoreBtn.style.display = 'none'; return; }
+  if (s.accessSuspended) {
+    field.style.display = 'block';
+    banner.style.background = '#fde8ee'; banner.style.color = '#a80d5d'; banner.style.borderColor = '#f5c2d8';
+    banner.innerHTML = `<b>Access suspended</b> since ${s.accessSuspendedAt ? new Date(s.accessSuspendedAt).toLocaleDateString() : 'unknown'}.${s.accessSuspendedReason ? ' Reason: ' + esc(s.accessSuspendedReason) : ''}`;
+    suspendBtn.style.display = 'none';
+    restoreBtn.style.display = 'inline-block';
+  } else {
+    field.style.display = 'none';
+    suspendBtn.style.display = 'inline-block';
+    restoreBtn.style.display = 'none';
+  }
+}
 
 function openAddModal() {
   editingSchoolId = null;
   $('#schoolModalTitle').textContent = 'Add School';
   $('#schoolForm').reset();
+  populateParentSchoolSelect(null);
+  $('#fParentSchool').value = '';
+  $('#fPlanType').value = '';
+  setPlanModules([]);
+  updatePlanModulesUI();
   $('#apiKeyField').style.display = 'none';
   $('#btnDeleteSchool').style.display = 'none';
+  renderAccessStatusUI(null);
   $('#schoolModalError').style.display = 'none';
   $('#schoolModalOverlay').classList.add('open');
 }
@@ -1442,6 +1610,11 @@ function openEditModal(id) {
   editingSchoolId = id;
   $('#schoolModalTitle').textContent = 'Edit School';
   $('#fSchoolName').value = s.name || '';
+  populateParentSchoolSelect(id);
+  $('#fParentSchool').value = s.parentSchoolId || '';
+  $('#fPlanType').value = s.planType || '';
+  setPlanModules(s.planModules || []);
+  updatePlanModulesUI();
   $('#fErpUrl').value = s.erpUrl || '';
   $('#fWebsiteUrl').value = s.websiteUrl || '';
   $('#fStatus').value = s.status || 'temporary';
@@ -1457,6 +1630,7 @@ function openEditModal(id) {
   $('#fApiKey').textContent = s.apiKey || '';
   $('#apiKeyField').style.display = 'block';
   $('#btnDeleteSchool').style.display = 'inline-block';
+  renderAccessStatusUI(s);
   $('#schoolModalError').style.display = 'none';
   $('#schoolModalOverlay').classList.add('open');
 }
@@ -1474,6 +1648,9 @@ $('#schoolForm').addEventListener('submit', async (e) => {
   errEl.style.display = 'none';
   const payload = {
     name: $('#fSchoolName').value,
+    parentSchoolId: $('#fParentSchool').value || null,
+    planType: $('#fPlanType').value || null,
+    planModules: getSelectedPlanModules(),
     erpUrl: $('#fErpUrl').value,
     websiteUrl: $('#fWebsiteUrl').value,
     status: $('#fStatus').value,
@@ -1538,6 +1715,35 @@ $('#btnDeleteSchool').addEventListener('click', async () => {
     await loadAll();
   } catch (err) {
     showToast('Could not delete: ' + err.message);
+  }
+});
+
+$('#btnSuspendAccess').addEventListener('click', async () => {
+  if (!editingSchoolId) return;
+  const s = schoolsCache.find(x => x.id === editingSchoolId);
+  if (!confirm('Suspend ERP access for "' + (s ? s.name : 'this school') + '"?\n\nTeachers, Staff, Parents and Students will be blocked from signing in and shown a message to contact the school office. That school\'s own Admin can still sign in. Nothing about their data is touched, and you can restore access any time.')) return;
+  const reason = prompt('Optional — a short reason to show the school (e.g. "Payment overdue for September"). Leave blank to skip.', '');
+  try {
+    const updated = await api('/api/schools/' + editingSchoolId + '/suspend-access', { method: 'POST', body: { reason: reason || '' } });
+    showToast('Access suspended for ' + updated.name + '.');
+    renderAccessStatusUI(updated);
+    await loadAll();
+  } catch (err) {
+    showToast('Could not suspend access: ' + err.message);
+  }
+});
+
+$('#btnRestoreAccess').addEventListener('click', async () => {
+  if (!editingSchoolId) return;
+  const s = schoolsCache.find(x => x.id === editingSchoolId);
+  if (!confirm('Restore ERP access for "' + (s ? s.name : 'this school') + '"? Everyone will be able to sign in again.')) return;
+  try {
+    const updated = await api('/api/schools/' + editingSchoolId + '/restore-access', { method: 'POST' });
+    showToast('Access restored for ' + updated.name + '.');
+    renderAccessStatusUI(updated);
+    await loadAll();
+  } catch (err) {
+    showToast('Could not restore access: ' + err.message);
   }
 });
 
