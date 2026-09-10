@@ -144,6 +144,32 @@ async function ensureSchema() {
   // pull deploy history and trigger a rollback via Render's own API. Never
   // used to reach that school's database; deploys and data stay separate.
   await sql`ALTER TABLE schools ADD COLUMN IF NOT EXISTS render_service_id TEXT`;
+  // Groups a main-branch school with its sub-branches (additional physical
+  // campuses) for organizing, billing and reporting in this dashboard only —
+  // each branch is still its own fully separate ERP deployment + database,
+  // created and onboarded individually like any school. Exactly two levels
+  // deep: a school that already has sub-branches of its own can never itself
+  // be set as someone else's sub-branch (enforced in the POST/PUT handlers
+  // below, not just here).
+  await sql`ALTER TABLE schools ADD COLUMN IF NOT EXISTS parent_school_id TEXT REFERENCES schools(id)`;
+  await sql`CREATE INDEX IF NOT EXISTS idx_schools_parent_school_id ON schools (parent_school_id)`;
+  // What this school is actually paying for — drives the Billing Plan /
+  // Billing Amount auto-fill in the Add/Edit School modal, and therefore
+  // what "Generate Invoices" bills them, since that reads billing_plan /
+  // billing_amount directly. plan_type is one of PLAN_TYPES below (or
+  // null if never set); plan_modules is always an array of PLAN_MODULE_KEYS
+  // — for the two "all modules" plan types it's implied/informational
+  // (every key), for 'erp_selected_modules' it's the actual pick.
+  await sql`ALTER TABLE schools ADD COLUMN IF NOT EXISTS plan_type TEXT`;
+  await sql`ALTER TABLE schools ADD COLUMN IF NOT EXISTS plan_modules JSONB NOT NULL DEFAULT '[]'`;
+  // A manual, vendor-triggered access cutoff for non-payment — never
+  // automatic (see suspend/restore routes below). When true, that school's
+  // own ERP (via vendor-reporting.js's heartbeat, which now round-trips
+  // this flag) blocks every login except Admin, showing access_suspended_reason
+  // if set. Nothing here ever touches that school's actual data.
+  await sql`ALTER TABLE schools ADD COLUMN IF NOT EXISTS access_suspended BOOLEAN NOT NULL DEFAULT false`;
+  await sql`ALTER TABLE schools ADD COLUMN IF NOT EXISTS access_suspended_at TIMESTAMPTZ`;
+  await sql`ALTER TABLE schools ADD COLUMN IF NOT EXISTS access_suspended_reason TEXT`;
   await sql`
     CREATE TABLE IF NOT EXISTS school_errors (
       id TEXT PRIMARY KEY,
@@ -266,7 +292,22 @@ async function ensureSchema() {
       updated_at TIMESTAMPTZ NOT NULL DEFAULT now()
     )
   `;
+  // Default Billing Amount the Add/Edit School modal fills in when a school
+  // is put on one of the two "all modules" plans (see PLAN_TYPES below).
+  // 'erp_selected_modules' has no default here — a custom module mix is
+  // priced by hand each time, same as before this feature existed.
+  await sql`ALTER TABLE vendor_settings ADD COLUMN IF NOT EXISTS default_price_erp_all_modules NUMERIC(12,2)`;
+  await sql`ALTER TABLE vendor_settings ADD COLUMN IF NOT EXISTS default_price_erp_all_modules_website NUMERIC(12,2)`;
 }
+
+// A school's plan — what it's actually entitled to — as distinct from its
+// billing_plan (free text) / billing_amount (the actual price charged).
+// Picking one of these in the UI auto-fills billing_plan/billing_amount as
+// a starting point (see PUT/POST /api/schools below have no server-side
+// auto-fill — that happens client-side so the vendor sees it before saving
+// and can still hand-edit it for a custom deal).
+const PLAN_TYPES = ['erp_selected_modules', 'erp_all_modules', 'erp_all_modules_website'];
+const PLAN_MODULE_KEYS = ['fees', 'attendance', 'exams', 'transport_library'];
 await ensureSchema();
 
 async function seedDefaultAdminIfEmpty() {
@@ -513,6 +554,8 @@ function shapeSettings(row) {
     contactEmail: row ? row.contact_email : null,
     contactPhone: row ? row.contact_phone : null,
     contactWhatsapp: row ? row.contact_whatsapp : null,
+    defaultPriceErpAllModules: row && row.default_price_erp_all_modules != null ? Number(row.default_price_erp_all_modules) : null,
+    defaultPriceErpAllModulesWebsite: row && row.default_price_erp_all_modules_website != null ? Number(row.default_price_erp_all_modules_website) : null,
     updatedAt: row ? row.updated_at : null,
   };
 }
@@ -529,14 +572,18 @@ app.get('/api/settings', async (req, res) => {
 
 app.put('/api/settings', async (req, res) => {
   try {
-    const { contactEmail, contactPhone, contactWhatsapp } = req.body || {};
+    const { contactEmail, contactPhone, contactWhatsapp, defaultPriceErpAllModules, defaultPriceErpAllModulesWebsite } = req.body || {};
+    const priceAll = defaultPriceErpAllModules != null && defaultPriceErpAllModules !== '' ? Number(defaultPriceErpAllModules) : null;
+    const priceAllWebsite = defaultPriceErpAllModulesWebsite != null && defaultPriceErpAllModulesWebsite !== '' ? Number(defaultPriceErpAllModulesWebsite) : null;
     await sql`
-      INSERT INTO vendor_settings (id, contact_email, contact_phone, contact_whatsapp, updated_at)
-      VALUES ('default', ${contactEmail || null}, ${contactPhone || null}, ${contactWhatsapp || null}, now())
+      INSERT INTO vendor_settings (id, contact_email, contact_phone, contact_whatsapp, default_price_erp_all_modules, default_price_erp_all_modules_website, updated_at)
+      VALUES ('default', ${contactEmail || null}, ${contactPhone || null}, ${contactWhatsapp || null}, ${priceAll}, ${priceAllWebsite}, now())
       ON CONFLICT (id) DO UPDATE SET
         contact_email = ${contactEmail || null},
         contact_phone = ${contactPhone || null},
         contact_whatsapp = ${contactWhatsapp || null},
+        default_price_erp_all_modules = ${priceAll},
+        default_price_erp_all_modules_website = ${priceAllWebsite},
         updated_at = now()
     `;
     const rows = await sql`SELECT * FROM vendor_settings WHERE id = 'default'`;
@@ -581,7 +628,48 @@ function shapeSchool(row, errorCount24h) {
     contactEmail: row.contact_email,
     contactPhone: row.contact_phone,
     renderServiceId: row.render_service_id,
+    parentSchoolId: row.parent_school_id,
+    planType: row.plan_type,
+    planModules: row.plan_modules || [],
+    accessSuspended: !!row.access_suspended,
+    accessSuspendedAt: row.access_suspended_at,
+    accessSuspendedReason: row.access_suspended_reason,
   };
+}
+
+// Shared by POST /api/schools and PUT /api/schools/:id. Returns { planType,
+// planModules } (both normalized/validated) or throws a 400-worthy message.
+function normalizePlanFields(planType, planModules) {
+  const finalPlanType = planType || null;
+  if (finalPlanType && !PLAN_TYPES.includes(finalPlanType)) {
+    throw new Error('Unrecognized plan type.');
+  }
+  let finalModules = Array.isArray(planModules) ? planModules.filter(m => PLAN_MODULE_KEYS.includes(m)) : [];
+  // "All modules" plans always carry every module key, whatever was sent —
+  // there's nothing to individually pick for those two plan types.
+  if (finalPlanType === 'erp_all_modules' || finalPlanType === 'erp_all_modules_website') {
+    finalModules = [...PLAN_MODULE_KEYS];
+  }
+  return { planType: finalPlanType, planModules: finalModules };
+}
+
+// Shared by POST /api/schools and PUT /api/schools/:id. Returns an error
+// string if parentSchoolId isn't a valid choice, otherwise null.
+// - the parent must exist
+// - a school can't be its own parent
+// - exactly two levels deep: the parent can't itself be a sub-branch, and a
+//   school that already has sub-branches of its own can't become one
+async function validateParentSchoolId(parentSchoolId, selfId) {
+  if (!parentSchoolId) return null;
+  if (selfId && parentSchoolId === selfId) return "A school can't be its own main branch.";
+  const parentRows = await sql`SELECT id, parent_school_id FROM schools WHERE id = ${parentSchoolId}`;
+  if (!parentRows.length) return 'Parent school not found.';
+  if (parentRows[0].parent_school_id) return "That school is itself a sub-branch — pick its main branch instead.";
+  if (selfId) {
+    const childRows = await sql`SELECT id FROM schools WHERE parent_school_id = ${selfId} LIMIT 1`;
+    if (childRows.length) return "This school already has its own sub-branches, so it can't be made a sub-branch itself.";
+  }
+  return null;
 }
 
 app.get('/api/schools', async (req, res) => {
@@ -605,21 +693,27 @@ app.post('/api/schools', async (req, res) => {
     const {
       name, erpUrl, websiteUrl, status, notes, onboardedDate,
       billingPlan, billingAmount, billingCycle, contactName, contactEmail, contactPhone,
-      renderServiceId,
+      renderServiceId, parentSchoolId, planType, planModules,
     } = req.body || {};
     if (!name || !String(name).trim()) return res.status(400).json({ error: 'School name is required.' });
+    const parentErr = await validateParentSchoolId(parentSchoolId || null, null);
+    if (parentErr) return res.status(400).json({ error: parentErr });
+    let normalizedPlan;
+    try { normalizedPlan = normalizePlanFields(planType, planModules); }
+    catch (e) { return res.status(400).json({ error: e.message }); }
     const id = 'sch_' + crypto.randomBytes(8).toString('hex');
     const apiKey = crypto.randomBytes(24).toString('base64url');
     await sql`
       INSERT INTO schools (
         id, name, erp_url, website_url, status, notes, api_key, onboarded_date,
         billing_plan, billing_amount, billing_cycle, contact_name, contact_email, contact_phone,
-        render_service_id
+        render_service_id, parent_school_id, plan_type, plan_modules
       )
       VALUES (
         ${id}, ${String(name).trim()}, ${erpUrl || null}, ${websiteUrl || null}, ${status || 'temporary'}, ${notes || null}, ${apiKey}, ${onboardedDate || null},
         ${billingPlan || null}, ${billingAmount != null && billingAmount !== '' ? Number(billingAmount) : null}, ${billingCycle || null},
-        ${contactName || null}, ${contactEmail || null}, ${contactPhone || null}, ${renderServiceId ? String(renderServiceId).trim() : null}
+        ${contactName || null}, ${contactEmail || null}, ${contactPhone || null}, ${renderServiceId ? String(renderServiceId).trim() : null},
+        ${parentSchoolId || null}, ${normalizedPlan.planType}, ${JSON.stringify(normalizedPlan.planModules)}
       )
     `;
     const rows = await sql`SELECT * FROM schools WHERE id = ${id}`;
@@ -639,8 +733,28 @@ app.put('/api/schools/:id', async (req, res) => {
     const {
       name, erpUrl, websiteUrl, status, notes, onboardedDate,
       billingPlan, billingAmount, billingCycle, contactName, contactEmail, contactPhone,
-      renderServiceId,
+      renderServiceId, parentSchoolId, planType, planModules,
     } = req.body || {};
+    // parentSchoolId: undefined means "not sent, leave as-is"; '' or null
+    // means "clear it"; anything else is a candidate parent id to validate.
+    let nextParentSchoolId = cur.parent_school_id;
+    if (parentSchoolId !== undefined) {
+      nextParentSchoolId = parentSchoolId || null;
+      const parentErr = await validateParentSchoolId(nextParentSchoolId, id);
+      if (parentErr) return res.status(400).json({ error: parentErr });
+    }
+    // planType/planModules: undefined means "not sent, leave as-is"; any
+    // other value (including an explicit null/'') re-normalizes both fields
+    // together, since planModules only makes sense alongside its planType.
+    let nextPlanType = cur.plan_type;
+    let nextPlanModules = cur.plan_modules || [];
+    if (planType !== undefined || planModules !== undefined) {
+      let normalizedPlan;
+      try { normalizedPlan = normalizePlanFields(planType !== undefined ? planType : cur.plan_type, planModules !== undefined ? planModules : cur.plan_modules); }
+      catch (e) { return res.status(400).json({ error: e.message }); }
+      nextPlanType = normalizedPlan.planType;
+      nextPlanModules = normalizedPlan.planModules;
+    }
     await sql`
       UPDATE schools SET
         name = ${name != null ? String(name).trim() : cur.name},
@@ -655,7 +769,10 @@ app.put('/api/schools/:id', async (req, res) => {
         contact_name = ${contactName != null ? contactName : cur.contact_name},
         contact_email = ${contactEmail != null ? contactEmail : cur.contact_email},
         contact_phone = ${contactPhone != null ? contactPhone : cur.contact_phone},
-        render_service_id = ${renderServiceId != null ? (String(renderServiceId).trim() || null) : cur.render_service_id}
+        render_service_id = ${renderServiceId != null ? (String(renderServiceId).trim() || null) : cur.render_service_id},
+        parent_school_id = ${nextParentSchoolId},
+        plan_type = ${nextPlanType},
+        plan_modules = ${JSON.stringify(nextPlanModules)}
       WHERE id = ${id}
     `;
     const rows = await sql`SELECT * FROM schools WHERE id = ${id}`;
@@ -669,10 +786,49 @@ app.put('/api/schools/:id', async (req, res) => {
 
 app.delete('/api/schools/:id', async (req, res) => {
   try {
+    const children = await sql`SELECT id FROM schools WHERE parent_school_id = ${req.params.id} LIMIT 1`;
+    if (children.length) {
+      return res.status(400).json({ error: 'This school has sub-branches. Delete or reassign them first.' });
+    }
     await sql`DELETE FROM schools WHERE id = ${req.params.id}`;
     return res.status(200).json({ ok: true });
   } catch (err) {
     console.error('delete school error:', err);
+    return res.status(500).json({ error: 'Something went wrong on the server.' });
+  }
+});
+
+// ---------- Access suspension (manual only — never automatic) ----------
+// A deliberate cutoff for non-payment. This never runs on a timer and never
+// fires from an invoice going overdue on its own — a vendor admin has to
+// click it. That school's own ERP picks this up the next time its
+// vendor-reporting.js heartbeat lands (see /api/ingest/heartbeat below) and
+// blocks every login except Admin. Nothing here touches that school's data.
+app.post('/api/schools/:id/suspend-access', async (req, res) => {
+  try {
+    const { reason } = req.body || {};
+    const rows = await sql`
+      UPDATE schools SET access_suspended = true, access_suspended_at = now(), access_suspended_reason = ${reason ? String(reason).trim().slice(0, 500) : null}
+      WHERE id = ${req.params.id} RETURNING *
+    `;
+    if (!rows.length) return res.status(404).json({ error: 'School not found.' });
+    return res.status(200).json(shapeSchool(rows[0], 0));
+  } catch (err) {
+    console.error('suspend access error:', err);
+    return res.status(500).json({ error: 'Something went wrong on the server.' });
+  }
+});
+
+app.post('/api/schools/:id/restore-access', async (req, res) => {
+  try {
+    const rows = await sql`
+      UPDATE schools SET access_suspended = false, access_suspended_at = null, access_suspended_reason = null
+      WHERE id = ${req.params.id} RETURNING *
+    `;
+    if (!rows.length) return res.status(404).json({ error: 'School not found.' });
+    return res.status(200).json(shapeSchool(rows[0], 0));
+  } catch (err) {
+    console.error('restore access error:', err);
     return res.status(500).json({ error: 'Something went wrong on the server.' });
   }
 });
@@ -1441,7 +1597,19 @@ app.post('/api/ingest/heartbeat', async (req, res) => {
       UPDATE schools SET last_heartbeat_at = now(), last_heartbeat_meta = ${meta ? JSON.stringify(meta) : null}
       WHERE id = ${school.id}
     `;
-    return res.status(200).json({ ok: true });
+    // Piggybacks the access-suspension flag — and, likewise, this school's
+    // current Plan/Modules selection — on the heartbeat that's already on a
+    // timer in every reporting-enabled school's vendor-reporting.js, rather
+    // than adding new endpoints/timers just for this. `school` here is the
+    // row as of the START of this request — neither suspension nor the plan
+    // is changed by this route, only read, so neither is ever stale.
+    return res.status(200).json({
+      ok: true,
+      accessSuspended: !!school.access_suspended,
+      accessSuspendedReason: school.access_suspended_reason || null,
+      planType: school.plan_type || null,
+      planModules: school.plan_modules || [],
+    });
   } catch (err) {
     console.error('heartbeat ingest error:', err);
     return res.status(500).json({ error: 'Something went wrong on the server.' });
