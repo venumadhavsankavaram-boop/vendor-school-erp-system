@@ -1657,7 +1657,7 @@
             </div>
             <div class="f-field">
               <label>Aadhar Number</label>
-              <input type="text" id="fAadhar" placeholder="12-digit Aadhaar number">
+              <input type="text" id="fAadhar" placeholder="12-digit Aadhaar number" inputmode="numeric" maxlength="12" oninput="this.value=this.value.replace(/\D/g,'').slice(0,12)">
             </div>
             <div class="f-field">
               <label>Caste Category</label>
@@ -1709,8 +1709,8 @@
           <h4 class="wpanel-h">Father Details</h4>
           <div class="form-grid">
             <div class="f-field"><label>Father Name</label><input type="text" id="fFatherName"></div>
-            <div class="f-field"><label>Father Phone Number</label><input type="tel" id="fFatherPhone"></div>
-            <div class="f-field"><label>Father Aadhaar</label><input type="text" id="fFatherAadhar"></div>
+            <div class="f-field"><label>Father Phone Number</label><input type="tel" id="fFatherPhone" inputmode="numeric" maxlength="10" oninput="this.value=this.value.replace(/\D/g,'').slice(0,10)"></div>
+            <div class="f-field"><label>Father Aadhaar</label><input type="text" id="fFatherAadhar" inputmode="numeric" maxlength="12" oninput="this.value=this.value.replace(/\D/g,'').slice(0,12)"></div>
             <div class="f-field"><label>Father Occupation</label><input type="text" id="fFatherOccupation"></div>
             <div class="f-field"><label>Father Annual Income (₹)</label><input type="number" id="fFatherIncome" min="0"></div>
             <div class="f-field full"><label>Father Address</label><input type="text" id="fFatherAddress"></div>
@@ -1718,8 +1718,8 @@
           <h4 class="wpanel-h">Mother Details</h4>
           <div class="form-grid">
             <div class="f-field"><label>Mother Name</label><input type="text" id="fMotherName"></div>
-            <div class="f-field"><label>Mother Phone Number</label><input type="tel" id="fMotherPhone"></div>
-            <div class="f-field"><label>Mother Aadhaar</label><input type="text" id="fMotherAadhar"></div>
+            <div class="f-field"><label>Mother Phone Number</label><input type="tel" id="fMotherPhone" inputmode="numeric" maxlength="10" oninput="this.value=this.value.replace(/\D/g,'').slice(0,10)"></div>
+            <div class="f-field"><label>Mother Aadhaar</label><input type="text" id="fMotherAadhar" inputmode="numeric" maxlength="12" oninput="this.value=this.value.replace(/\D/g,'').slice(0,12)"></div>
             <div class="f-field"><label>Mother Occupation</label><input type="text" id="fMotherOccupation"></div>
             <div class="f-field"><label>Mother Annual Income (₹)</label><input type="number" id="fMotherIncome" min="0"></div>
             <div class="f-field full"><label>Mother Address</label><input type="text" id="fMotherAddress"></div>
@@ -1733,7 +1733,7 @@
           <div class="form-grid" id="guardianFields" style="display:none;">
             <div class="f-field"><label>Guardian Name</label><input type="text" id="fGuardianName"></div>
             <div class="f-field"><label>Relation to Student</label><input type="text" id="fGuardianRelation"></div>
-            <div class="f-field"><label>Guardian Phone</label><input type="tel" id="fGuardianPhone"></div>
+            <div class="f-field"><label>Guardian Phone</label><input type="tel" id="fGuardianPhone" inputmode="numeric" maxlength="10" oninput="this.value=this.value.replace(/\D/g,'').slice(0,10)"></div>
             <div class="f-field full"><label>Guardian Address</label><input type="text" id="fGuardianAddress"></div>
           </div>
         </div>
@@ -2058,7 +2058,7 @@
             <div class="f-field"><label>Gender *</label><select id="stfGender" required><option value="" disabled selected>Select gender</option><option>Male</option><option>Female</option><option>Other</option></select></div>
             <div class="f-field"><label>Date of Birth *</label><input type="date" id="stfDob" required></div>
             <div class="f-field"><label>Blood Group</label><select id="stfBlood"><option value="">Select blood group</option><option>A+</option><option>A-</option><option>B+</option><option>B-</option><option>AB+</option><option>AB-</option><option>O+</option><option>O-</option></select></div>
-            <div class="f-field"><label>Aadhar Number</label><input type="text" id="stfAadhar" placeholder="12-digit Aadhaar number"></div>
+            <div class="f-field"><label>Aadhar Number</label><input type="text" id="stfAadhar" placeholder="12-digit Aadhaar number" inputmode="numeric" maxlength="12" oninput="this.value=this.value.replace(/\D/g,'').slice(0,12)"></div>
           </div>
         </div>
 
@@ -2117,11 +2117,11 @@
 
         <div class="wtab-panel" id="stfpanel-contact" style="display:none;">
           <div class="form-grid">
-            <div class="f-field"><label>Phone *</label><input type="text" id="stfPhone" required placeholder="10-digit mobile number"></div>
+            <div class="f-field"><label>Phone *</label><input type="text" id="stfPhone" required placeholder="10-digit mobile number" inputmode="numeric" maxlength="10" oninput="this.value=this.value.replace(/\D/g,'').slice(0,10)"></div>
             <div class="f-field"><label>Email *</label><input type="email" id="stfEmail" required placeholder="staff@example.com"></div>
             <div class="f-field full"><label>Address *</label><input type="text" id="stfAddress" required placeholder="Full address"></div>
             <div class="f-field"><label>Emergency Contact Name</label><input type="text" id="stfEmergencyName" placeholder="Optional"></div>
-            <div class="f-field"><label>Emergency Contact Phone</label><input type="text" id="stfEmergencyPhone" placeholder="Optional"></div>
+            <div class="f-field"><label>Emergency Contact Phone</label><input type="text" id="stfEmergencyPhone" placeholder="Optional" inputmode="numeric" maxlength="10" oninput="this.value=this.value.replace(/\D/g,'').slice(0,10)"></div>
           </div>
           <label class="admission-toggle" style="justify-content:flex-start; margin:16px 0 4px;">
             <input type="checkbox" id="stfCreateLogin" onchange="toggleStaffLoginFields()"> Also create a login for this staff member
@@ -2536,6 +2536,28 @@
     t.textContent = msg;
     t.classList.add('show');
     setTimeout(() => t.classList.remove('show'), 2200);
+  }
+
+  /* ===== Field validation helpers (mobile numbers, Aadhaar, photo size) =====
+     Matching HTML attributes (maxlength/inputmode/oninput digit-filtering) on
+     the fields themselves stop most bad input as it's typed; these run again
+     at save time in case a value was pasted in or left partially filled. */
+  function digitsOnly(str){ return (str || '').replace(/\D/g, ''); }
+  function isValidMobile(str){ const d = digitsOnly(str); return d.length === 10; }
+  function isValidAadhar(str){ const d = digitsOnly(str); return d.length === 12; }
+
+  const PHOTO_UPLOAD_MAX_BYTES = 2 * 1024 * 1024; // 2MB — generous for a photo/signature/logo, keeps records and backups from bloating
+  function readImageFileWithSizeLimit(e, onLoaded){
+    const file = e.target.files[0];
+    if(!file) return;
+    if(file.size > PHOTO_UPLOAD_MAX_BYTES){
+      showToast(`That image is ${(file.size/1024/1024).toFixed(1)}MB — please choose one under ${(PHOTO_UPLOAD_MAX_BYTES/1024/1024).toFixed(0)}MB.`);
+      e.target.value = '';
+      return;
+    }
+    const reader = new FileReader();
+    reader.onload = evt => onLoaded(evt.target.result);
+    reader.readAsDataURL(file);
   }
 
   /* ===== Styled confirm / info dialogs (replace native window.confirm/alert) ===== */
@@ -7522,15 +7544,11 @@
     `;
   }
   function previewSignature(e, which){
-    const file = e.target.files[0];
-    if(!file) return;
-    const reader = new FileReader();
-    reader.onload = evt => {
-      if(which===1){ sig1Data = evt.target.result; document.getElementById('sig1Preview').src = sig1Data; document.getElementById('sig1Preview').style.display='inline-block'; }
-      else { sig2Data = evt.target.result; document.getElementById('sig2Preview').src = sig2Data; document.getElementById('sig2Preview').style.display='inline-block'; }
+    readImageFileWithSizeLimit(e, dataUrl => {
+      if(which===1){ sig1Data = dataUrl; document.getElementById('sig1Preview').src = sig1Data; document.getElementById('sig1Preview').style.display='inline-block'; }
+      else { sig2Data = dataUrl; document.getElementById('sig2Preview').src = sig2Data; document.getElementById('sig2Preview').style.display='inline-block'; }
       renderTemplateEditor(document.getElementById('resultBody')); // refresh to show Remove button
-    };
-    reader.readAsDataURL(file);
+    });
   }
   function clearSignature(which){
     if(which===1) sig1Data=''; else sig2Data='';
@@ -8357,16 +8375,12 @@
     `;
   }
   function previewExamPrincipalSignature(e){
-    const file = e.target.files[0];
-    if(!file) return;
-    const reader = new FileReader();
-    reader.onload = async evt => {
-      schoolInfo.principalSignature = evt.target.result;
+    readImageFileWithSizeLimit(e, async dataUrl => {
+      schoolInfo.principalSignature = dataUrl;
       await storageSet(SCHOOL_INFO_KEY, schoolInfo);
       showToast('Principal / Correspondent signature saved.');
       renderRoomAllotSubBody();
-    };
-    reader.readAsDataURL(file);
+    });
   }
   async function removeExamPrincipalSignature(){
     if(!await showConfirmDialog('Remove the Principal / Correspondent signature? It will need to be re-uploaded before it appears on Admit Cards or Progress Reports again.')) return;
@@ -10698,29 +10712,21 @@
   }
 
   function previewStaffPhoto(e){
-    const file = e.target.files[0];
-    if(!file) return;
-    const reader = new FileReader();
-    reader.onload = evt => {
-      staffPhotoData = evt.target.result;
+    readImageFileWithSizeLimit(e, dataUrl => {
+      staffPhotoData = dataUrl;
       document.getElementById('staffPhotoPreview').src = staffPhotoData;
       document.getElementById('staffPhotoPreview').style.display = 'block';
       document.getElementById('staffPhotoPlaceholder').style.display = 'none';
-    };
-    reader.readAsDataURL(file);
+    });
   }
 
   function previewStaffSignature(e){
-    const file = e.target.files[0];
-    if(!file) return;
-    const reader = new FileReader();
-    reader.onload = evt => {
-      staffSignatureData = evt.target.result;
+    readImageFileWithSizeLimit(e, dataUrl => {
+      staffSignatureData = dataUrl;
       document.getElementById('staffSigPreview').src = staffSignatureData;
       document.getElementById('staffSigPreview').style.display = 'block';
       document.getElementById('staffSigPlaceholder').style.display = 'none';
-    };
-    reader.readAsDataURL(file);
+    });
   }
 
   function populateStaffDropdowns(){
@@ -10914,6 +10920,26 @@
     e.preventDefault();
     const editId = document.getElementById('editStaffId').value;
     const g = id => document.getElementById(id).value;
+
+    const stfPhoneVal = g('stfPhone').trim();
+    if(!stfPhoneVal || !isValidMobile(stfPhoneVal)){
+      showToast('Phone must be a valid 10-digit mobile number.');
+      document.getElementById('stfPhone').focus();
+      return false;
+    }
+    const stfEmergencyPhoneVal = g('stfEmergencyPhone').trim();
+    if(stfEmergencyPhoneVal && !isValidMobile(stfEmergencyPhoneVal)){
+      showToast('Emergency Contact Phone must be exactly 10 digits.');
+      document.getElementById('stfEmergencyPhone').focus();
+      return false;
+    }
+    const stfAadharVal = g('stfAadhar').trim();
+    if(stfAadharVal && !isValidAadhar(stfAadharVal)){
+      showToast('Aadhar Number must be exactly 12 digits.');
+      document.getElementById('stfAadhar').focus();
+      return false;
+    }
+
     const jobTypes = Array.from(document.querySelectorAll('.stf-jobtype-check:checked')).map(c => c.value);
     const ctVal = g('stfClassTeacherOf');
     const [ctClass, ctSection] = ctVal ? ctVal.split('|') : ['', ''];
@@ -12427,14 +12453,10 @@
     `;
   }
   function onGalleryPhotoSelected(e){
-    const file = e.target.files[0];
-    if(!file) return;
-    const reader = new FileReader();
-    reader.onload = evt => {
-      galleryUploadData = evt.target.result;
+    readImageFileWithSizeLimit(e, dataUrl => {
+      galleryUploadData = dataUrl;
       renderWebsiteGallery(document.getElementById('websiteGalleryBody'));
-    };
-    reader.readAsDataURL(file);
+    });
   }
   async function saveGalleryPhoto(){
     if(!galleryUploadData){ showToast('Choose a photo first.'); return; }
@@ -13088,7 +13110,7 @@
           <div class="f-field"><label>Bed Capacity *</label><input type="number" id="hsCapacity" value="${r?r.capacity:2}" min="1"></div>
           <div class="f-field"><label>Fee (₹/year) *</label><input type="number" id="hsFee" value="${r?r.fee:''}" min="0"></div>
           <div class="f-field"><label>Warden Name</label><input type="text" id="hsWardenName" value="${r?r.wardenName||'':''}" placeholder="e.g. Suresh Naidu"></div>
-          <div class="f-field"><label>Warden Phone</label><input type="text" id="hsWardenPhone" value="${r?r.wardenPhone||'':''}" placeholder="10-digit mobile"></div>
+          <div class="f-field"><label>Warden Phone</label><input type="text" id="hsWardenPhone" value="${r?r.wardenPhone||'':''}" placeholder="10-digit mobile" inputmode="numeric" maxlength="10" oninput="this.value=this.value.replace(/\D/g,'').slice(0,10)"></div>
         </div>
         <div style="display:flex; gap:10px; margin-top:16px;">
           <button class="btn btn-ghost" onclick="backToRoomsList()">Cancel</button>
@@ -13107,6 +13129,7 @@
     const wardenPhone = document.getElementById('hsWardenPhone').value.trim();
     if(!blockName || !roomNumber){ showToast('Enter a block name and room number.'); return; }
     if(fee <= 0){ showToast('Enter a fee for this room.'); return; }
+    if(wardenPhone && !isValidMobile(wardenPhone)){ showToast('Warden Phone must be exactly 10 digits.'); return; }
     if(editingRoomId){
       const occ = hostelOccupants(editingRoomId).length;
       if(capacity < occ){ showToast(`Can't reduce capacity below ${occ} — that many students are already in this room.`); return; }
@@ -13689,7 +13712,7 @@
           <div class="f-field full"><label>Route Name *</label><input type="text" id="trRouteName" value="${trEditName}" placeholder="e.g. Route 1 — Main Market Stop"></div>
           <div class="f-field"><label>Bus Number</label><input type="text" id="trBusNumber" value="${trEditBusNumber}" placeholder="e.g. AP 03 TZ 4521"></div>
           <div class="f-field"><label>Driver Name</label><input type="text" id="trDriverName" value="${trEditDriverName}" placeholder="e.g. Ramesh Kumar"></div>
-          <div class="f-field"><label>Driver Phone</label><input type="text" id="trDriverPhone" value="${trEditDriverPhone}" placeholder="10-digit mobile"></div>
+          <div class="f-field"><label>Driver Phone</label><input type="text" id="trDriverPhone" value="${trEditDriverPhone}" placeholder="10-digit mobile" inputmode="numeric" maxlength="10" oninput="this.value=this.value.replace(/\D/g,'').slice(0,10)"></div>
         </div>
         <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:6px;">
           <h4 style="margin:0;">🚏 Stops &amp; Fares</h4>
@@ -13732,6 +13755,7 @@
     const driverPhone = document.getElementById('trDriverPhone').value.trim();
     if(!name){ showToast('Enter a route name.'); return; }
     if(trEditStops.some(s => !s.name.trim())){ showToast('Every stop needs a name.'); return; }
+    if(driverPhone && !isValidMobile(driverPhone)){ showToast('Driver Phone must be exactly 10 digits.'); return; }
     const data = { name, busNumber, driverName, driverPhone, stops: trEditStops };
     if(editingRouteId){
       const idx = transportRoutes.findIndex(x => x.id === editingRouteId);
@@ -14395,14 +14419,10 @@
     `;
   }
   function previewMyAccountPhoto(e){
-    const file = e.target.files[0];
-    if(!file) return;
-    const reader = new FileReader();
-    reader.onload = evt => {
-      myAccountPhotoData = evt.target.result;
+    readImageFileWithSizeLimit(e, dataUrl => {
+      myAccountPhotoData = dataUrl;
       renderMyAccountBody();
-    };
-    reader.readAsDataURL(file);
+    });
   }
   function removeMyAccountPhoto(){
     myAccountPhotoData = '';
@@ -15701,7 +15721,7 @@
         <h4>Contact Details</h4>
         <div class="form-grid" style="margin-top:12px;">
           <div class="f-field"><label>Email</label><input type="email" id="siEmail" value="${schoolInfo.email||''}"></div>
-          <div class="f-field"><label>Phone</label><input type="text" id="siPhone" value="${schoolInfo.phone||''}"></div>
+          <div class="f-field"><label>Phone</label><input type="text" id="siPhone" value="${schoolInfo.phone||''}" inputmode="numeric" maxlength="10" oninput="this.value=this.value.replace(/\D/g,'').slice(0,10)"></div>
           <div class="f-field full"><label>Website</label><input type="text" id="siWebsite" value="${schoolInfo.website||''}"></div>
         </div>
       </div>
@@ -15746,28 +15766,26 @@
     `;
   }
   function previewPrincipalSignature(e){
-    const file = e.target.files[0];
-    if(!file) return;
-    const reader = new FileReader();
-    reader.onload = evt => {
-      schoolPrincipalSignatureData = evt.target.result;
+    readImageFileWithSizeLimit(e, dataUrl => {
+      schoolPrincipalSignatureData = dataUrl;
       document.getElementById('schoolSigPreview').src = schoolPrincipalSignatureData;
       document.getElementById('schoolSigPreview').style.display = 'block';
       document.getElementById('schoolSigPlaceholder').style.display = 'none';
-    };
-    reader.readAsDataURL(file);
+    });
   }
   function previewSchoolLogo(e){
-    const file = e.target.files[0];
-    if(!file) return;
-    const reader = new FileReader();
-    reader.onload = evt => {
-      schoolLogoData = evt.target.result;
+    readImageFileWithSizeLimit(e, dataUrl => {
+      schoolLogoData = dataUrl;
       document.getElementById('schoolLogoPreview').src = schoolLogoData;
-    };
-    reader.readAsDataURL(file);
+    });
   }
   async function saveSchoolProfile(){
+    const siPhoneVal = document.getElementById('siPhone').value.trim();
+    if(siPhoneVal && !isValidMobile(siPhoneVal)){
+      showToast('Phone must be exactly 10 digits.');
+      document.getElementById('siPhone').focus();
+      return;
+    }
     schoolInfo = {
       name: document.getElementById('siName').value.trim(),
       tagline: document.getElementById('siTagline').value.trim(),
@@ -18096,16 +18114,12 @@
   }
 
   function previewPhoto(e){
-    const file = e.target.files[0];
-    if(!file) return;
-    const reader = new FileReader();
-    reader.onload = function(evt){
-      wizardPhotoData = evt.target.result;
+    readImageFileWithSizeLimit(e, dataUrl => {
+      wizardPhotoData = dataUrl;
       document.getElementById('photoPreview').src = wizardPhotoData;
       document.getElementById('photoPreview').style.display = 'block';
       document.getElementById('photoPlaceholder').style.display = 'none';
-    };
-    reader.readAsDataURL(file);
+    });
   }
 
   function populateSiblingSelect(excludeId){
@@ -18318,6 +18332,33 @@
     e.preventDefault();
     const editId = document.getElementById('editId').value;
     const g = id => document.getElementById(id).value;
+
+    const wizardMobileChecks = [
+      ['fFatherPhone', "Father's Phone Number"],
+      ['fMotherPhone', "Mother's Phone Number"],
+      ['fGuardianPhone', 'Guardian Phone'],
+    ];
+    for(const [fid, label] of wizardMobileChecks){
+      const val = g(fid).trim();
+      if(val && !isValidMobile(val)){
+        showToast(`${label} must be exactly 10 digits.`);
+        document.getElementById(fid).focus();
+        return false;
+      }
+    }
+    const wizardAadharChecks = [
+      ['fAadhar', 'Aadhar Number'],
+      ['fFatherAadhar', "Father's Aadhaar"],
+      ['fMotherAadhar', "Mother's Aadhaar"],
+    ];
+    for(const [fid, label] of wizardAadharChecks){
+      const val = g(fid).trim();
+      if(val && !isValidAadhar(val)){
+        showToast(`${label} must be exactly 12 digits.`);
+        document.getElementById(fid).focus();
+        return false;
+      }
+    }
 
     const data = {
       firstName: g('fFirstName').trim(), lastName: g('fLastName').trim(),
