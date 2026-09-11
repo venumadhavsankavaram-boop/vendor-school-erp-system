@@ -495,6 +495,14 @@
           <button type="button" class="btn btn-light btn-sm" id="btnRegenKey">Regenerate</button>
         </div>
       </div>
+      <div class="field" id="envSnippetField" style="display:none;">
+        <label>Ready-to-paste .env block (for this school's ERP on Render)</label>
+        <textarea id="fEnvSnippet" readonly style="font-family:monospace; font-size:0.78rem; min-height:150px;"></textarea>
+        <div style="display:flex; gap:8px; margin-top:6px;">
+          <button type="button" class="btn btn-light btn-sm" id="btnCopyEnvSnippet">Copy</button>
+        </div>
+        <div style="font-size:0.76rem; color:var(--ink-soft); margin-top:4px;">Paste this into the ERP's Environment tab on Render. <code style="font-family:monospace;">DATABASE_URL</code> (and <code style="font-family:monospace;">RAZORPAY_*</code> / <code style="font-family:monospace;">BIOMETRIC_API_KEY</code> if that school uses them) still need to come from their own source — see the comments in the block.</div>
+      </div>
       <div class="field" id="accessStatusField" style="display:none;">
         <label>Access</label>
         <div id="accessStatusBanner" style="border-radius:8px; padding:10px 12px; font-size:0.82rem; background:#fde8ee; color:#a80d5d; border:1px solid #f5c2d8;"></div>
@@ -958,7 +966,11 @@ function showLogin() {
 function showApp() {
   $('#loginOverlay').style.display = 'none';
   $('#appShell').style.display = 'block';
-  loadAll();
+  // If we were opened from website-builder.html's "Register this school in
+  // vendor-dashboard" button, its params are in the URL hash — wait for
+  // loadAll() so populateParentSchoolSelect() etc. have data before the
+  // modal opens.
+  loadAll().then(maybeOpenAddSchoolFromHash);
 }
 
 $('#loginForm').addEventListener('submit', async (e) => {
@@ -1620,6 +1632,61 @@ function renderAccessStatusUI(s) {
   }
 }
 
+// Builds the ready-to-paste .env block for a school's ERP deployment on
+// Render, from values only vendor-dashboard has right after creating (or
+// re-keying) that school: its id, its API key, and the website URL it was
+// given. DATABASE_URL and the optional payment/biometric keys are left as
+// commented placeholders since those come from Neon / Razorpay / the
+// biometric vendor, not from here.
+function buildEnvSnippet(created, payload) {
+  const websiteUrl = (payload && payload.websiteUrl) || '';
+  return [
+    '# --- Database (create in Neon, paste its connection string here) ---',
+    'DATABASE_URL=',
+    '',
+    '# --- This school\'s website, for CORS ---',
+    'WEBSITE_ORIGIN=' + websiteUrl,
+    '',
+    '# --- Fleet reporting, so this ERP shows up live in vendor-dashboard ---',
+    'VENDOR_DASHBOARD_URL=' + location.origin,
+    'VENDOR_SCHOOL_ID=' + created.id,
+    'VENDOR_API_KEY=' + created.apiKey,
+    '',
+    '# --- Optional, only if this school uses them ---',
+    '# RAZORPAY_KEY_ID=',
+    '# RAZORPAY_KEY_SECRET=',
+    '# BIOMETRIC_API_KEY=',
+  ].join('\n');
+}
+
+// Populates and reveals the "Ready-to-paste .env block" field in the
+// Add/Edit School modal. Safe to call any time editingSchoolId's API key
+// is known — right after creating a school, after regenerating its key, or
+// when reopening an already-onboarded school to copy its block again.
+function renderEnvSnippet(created, payload) {
+  $('#fEnvSnippet').value = buildEnvSnippet(created, payload);
+  $('#envSnippetField').style.display = 'block';
+}
+
+// If the page was opened with a #addschool?name=...&erpUrl=...&websiteUrl=...
+// &contactEmail=...&contactPhone=... hash — as built by website-builder.html's
+// "Register this school in vendor-dashboard" button — opens the Add School
+// modal pre-filled from those params, then clears the hash so a refresh
+// doesn't reopen it. Left blank/absent params are simply left blank.
+function maybeOpenAddSchoolFromHash() {
+  const hash = location.hash || '';
+  const m = hash.match(/^#addschool\?(.*)$/);
+  if (!m) return;
+  const params = new URLSearchParams(m[1]);
+  openAddModal();
+  if (params.get('name')) $('#fSchoolName').value = params.get('name');
+  if (params.get('erpUrl')) $('#fErpUrl').value = params.get('erpUrl');
+  if (params.get('websiteUrl')) $('#fWebsiteUrl').value = params.get('websiteUrl');
+  if (params.get('contactEmail')) $('#fContactEmail').value = params.get('contactEmail');
+  if (params.get('contactPhone')) $('#fContactPhone').value = params.get('contactPhone');
+  history.replaceState(null, '', location.pathname + location.search);
+}
+
 function openAddModal() {
   editingSchoolId = null;
   $('#schoolModalTitle').textContent = 'Add School';
@@ -1630,6 +1697,7 @@ function openAddModal() {
   setPlanModules([]);
   updatePlanModulesUI();
   $('#apiKeyField').style.display = 'none';
+  $('#envSnippetField').style.display = 'none';
   $('#btnDeleteSchool').style.display = 'none';
   renderAccessStatusUI(null);
   $('#schoolModalError').style.display = 'none';
@@ -1661,6 +1729,11 @@ function openEditModal(id) {
   $('#fNotes').value = s.notes || '';
   $('#fApiKey').textContent = s.apiKey || '';
   $('#apiKeyField').style.display = 'block';
+  if (s.apiKey) {
+    renderEnvSnippet({ id: s.id, apiKey: s.apiKey }, { websiteUrl: s.websiteUrl || '' });
+  } else {
+    $('#envSnippetField').style.display = 'none';
+  }
   $('#btnDeleteSchool').style.display = 'inline-block';
   renderAccessStatusUI(s);
   $('#schoolModalError').style.display = 'none';
@@ -1706,9 +1779,10 @@ $('#schoolForm').addEventListener('submit', async (e) => {
       editingSchoolId = created.id;
       $('#fApiKey').textContent = created.apiKey;
       $('#apiKeyField').style.display = 'block';
+      renderEnvSnippet(created, payload);
       $('#btnDeleteSchool').style.display = 'inline-block';
       await loadAll();
-      return; // keep modal open so the vendor can copy the API key
+      return; // keep modal open so the vendor can copy the API key and .env block
     }
     closeSchoolModal();
     await loadAll();
@@ -1723,12 +1797,18 @@ $('#btnCopyKey').addEventListener('click', () => {
   navigator.clipboard.writeText(key).then(() => showToast('API key copied.')).catch(() => showToast('Could not copy — select the key manually.'));
 });
 
+$('#btnCopyEnvSnippet').addEventListener('click', () => {
+  const text = $('#fEnvSnippet').value;
+  navigator.clipboard.writeText(text).then(() => showToast('.env block copied.')).catch(() => showToast('Could not copy — select the text manually.'));
+});
+
 $('#btnRegenKey').addEventListener('click', async () => {
   if (!editingSchoolId) return;
   if (!confirm('Regenerate this school\'s API key? The old key will stop working immediately — you\'ll need to update it in that school\'s reporting config.')) return;
   try {
     const res = await api('/api/schools/' + editingSchoolId + '/regenerate-key', { method: 'POST' });
     $('#fApiKey').textContent = res.apiKey;
+    renderEnvSnippet({ id: editingSchoolId, apiKey: res.apiKey }, { websiteUrl: $('#fWebsiteUrl').value || '' });
     showToast('API key regenerated.');
     await loadAll();
   } catch (err) {
