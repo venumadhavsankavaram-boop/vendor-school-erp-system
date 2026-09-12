@@ -1614,7 +1614,7 @@
             </div>
             <div class="f-field">
               <label>Roll Number</label>
-              <input type="text" id="fRollNo" placeholder="e.g. 12">
+              <input type="text" id="fRollNo" placeholder="e.g. 12" inputmode="numeric" maxlength="10" oninput="this.value=this.value.replace(/\D/g,'').slice(0,10)">
             </div>
             <div class="f-field">
               <label>Gender</label>
@@ -1653,7 +1653,7 @@
             </div>
             <div class="f-field">
               <label>PEN Number</label>
-              <input type="text" id="fPen" placeholder="Permanent Education Number">
+              <input type="text" id="fPen" placeholder="Permanent Education Number" inputmode="numeric" maxlength="12" oninput="this.value=this.value.replace(/\D/g,'').slice(0,12)">
             </div>
             <div class="f-field">
               <label>Aadhar Number</label>
@@ -2109,8 +2109,8 @@
           <div class="form-grid">
             <div class="f-field"><label>Bank Name</label><input type="text" id="stfBankName" placeholder="e.g. State Bank of India"></div>
             <div class="f-field"><label>Account Holder Name</label><input type="text" id="stfBankAccountName" placeholder="As per bank records"></div>
-            <div class="f-field"><label>Account Number</label><input type="text" id="stfBankAccountNumber" placeholder="Bank account number"></div>
-            <div class="f-field"><label>IFSC Code</label><input type="text" id="stfBankIfsc" placeholder="e.g. SBIN0001234" style="text-transform:uppercase;"></div>
+            <div class="f-field"><label>Account Number</label><input type="text" id="stfBankAccountNumber" placeholder="Bank account number" inputmode="numeric" maxlength="18" oninput="this.value=this.value.replace(/\D/g,'').slice(0,18)"></div>
+            <div class="f-field"><label>IFSC Code</label><input type="text" id="stfBankIfsc" placeholder="e.g. SBIN0001234" style="text-transform:uppercase;" maxlength="11" oninput="this.value=this.value.toUpperCase().replace(/[^A-Z0-9]/g,'').slice(0,11)"></div>
           </div>
           <p style="font-size:0.76rem; color:var(--ink-soft); margin:8px 0 0;">Optional — only used to prefill the Salary Disbursement Report (Staff → Payroll) so it's ready to hand off to your bank or accountant. Nobody outside Payroll access can see this.</p>
         </div>
@@ -2545,6 +2545,10 @@
   function digitsOnly(str){ return (str || '').replace(/\D/g, ''); }
   function isValidMobile(str){ const d = digitsOnly(str); return d.length === 10; }
   function isValidAadhar(str){ const d = digitsOnly(str); return d.length === 12; }
+  function isValidPin(str){ const d = digitsOnly(str); return d.length === 6; }
+  function isValidUdise(str){ const d = digitsOnly(str); return d.length === 11; }
+  function isValidBankAccount(str){ const d = digitsOnly(str); return d.length >= 6 && d.length <= 18; }
+  function isValidIfsc(str){ return /^[A-Z]{4}0[A-Z0-9]{6}$/.test((str||'').trim().toUpperCase()); }
 
   const PHOTO_UPLOAD_MAX_BYTES = 2 * 1024 * 1024; // 2MB — generous for a photo/signature/logo, keeps records and backups from bloating
   function readImageFileWithSizeLimit(e, onLoaded){
@@ -6913,7 +6917,18 @@
 
   async function saveMarksSheet(){
     const exam = examDefs.find(e => e.id === examCurrentExamId);
-    document.querySelectorAll('.marks-input').forEach(inp => {
+    const markInputs = document.querySelectorAll('.marks-input');
+    for(const inp of markInputs){
+      if(inp.disabled || inp.value === '') continue;
+      const val = Number(inp.value);
+      const maxAllowed = inp.max === '' ? null : Number(inp.max);
+      if(isNaN(val) || val < 0 || (maxAllowed !== null && val > maxAllowed)){
+        showToast(`Marks for "${inp.dataset.subject}" must be between 0 and ${inp.max} — please fix the highlighted entry.`);
+        inp.focus();
+        return;
+      }
+    }
+    markInputs.forEach(inp => {
       const studentId = inp.dataset.student;
       const subject = inp.dataset.subject;
       const absentBox = document.querySelector(`.marks-absent-check[data-student="${studentId}"][data-subject="${CSS.escape(subject)}"]`);
@@ -7684,8 +7699,8 @@
         <tbody>
         ${consolidationScale.map((g,i) => `<tr>
           <td><input type="text" class="input cs-grade" value="${g.grade}" style="max-width:80px;"></td>
-          <td><input type="number" class="input cs-min" value="${g.minPct}" style="max-width:80px;"></td>
-          <td><input type="number" class="input cs-max" value="${g.maxPct}" style="max-width:80px;"></td>
+          <td><input type="number" class="input cs-min" value="${g.minPct}" min="0" max="100" style="max-width:80px;"></td>
+          <td><input type="number" class="input cs-max" value="${g.maxPct}" min="0" max="100" style="max-width:80px;"></td>
           <td><button class="btn-danger-text" onclick="removeConsolGradeRow(${i})">Remove</button></td>
         </tr>`).join('')}
         </tbody></table>
@@ -7706,6 +7721,18 @@
     const grades = document.querySelectorAll('.cs-grade');
     const mins = document.querySelectorAll('.cs-min');
     const maxs = document.querySelectorAll('.cs-max');
+    for(let i=0;i<grades.length;i++){
+      if(!grades[i].value.trim()) continue;
+      const minV = Number(mins[i].value)||0, maxV = Number(maxs[i].value)||0;
+      if(minV<0 || minV>100 || maxV<0 || maxV>100){
+        showToast(`"${grades[i].value.trim()}" grade's Min/Max % must each be between 0 and 100.`);
+        return;
+      }
+      if(minV>maxV){
+        showToast(`"${grades[i].value.trim()}" grade's Min % can't be greater than its Max %.`);
+        return;
+      }
+    }
     consolidationScale = Array.from(grades).map((el,i) => ({
       grade: el.value.trim(), minPct: Number(mins[i].value)||0, maxPct: Number(maxs[i].value)||0,
     })).filter(g => g.grade);
@@ -7725,8 +7752,8 @@
         <tbody>
         ${gradingScale.map((g,i) => `<tr>
           <td><input type="text" class="input gs-grade" value="${g.grade}" style="max-width:80px;"></td>
-          <td><input type="number" class="input gs-min" value="${g.minPct}" style="max-width:80px;"></td>
-          <td><input type="number" class="input gs-max" value="${g.maxPct}" style="max-width:80px;"></td>
+          <td><input type="number" class="input gs-min" value="${g.minPct}" min="0" max="100" style="max-width:80px;"></td>
+          <td><input type="number" class="input gs-max" value="${g.maxPct}" min="0" max="100" style="max-width:80px;"></td>
           <td><button class="btn-danger-text" onclick="removeGradeRow(${i})">Remove</button></td>
         </tr>`).join('')}
         </tbody></table>
@@ -7747,6 +7774,18 @@
     const grades = document.querySelectorAll('.gs-grade');
     const mins = document.querySelectorAll('.gs-min');
     const maxs = document.querySelectorAll('.gs-max');
+    for(let i=0;i<grades.length;i++){
+      if(!grades[i].value.trim()) continue;
+      const minV = Number(mins[i].value)||0, maxV = Number(maxs[i].value)||0;
+      if(minV<0 || minV>100 || maxV<0 || maxV>100){
+        showToast(`"${grades[i].value.trim()}" grade's Min/Max % must each be between 0 and 100.`);
+        return;
+      }
+      if(minV>maxV){
+        showToast(`"${grades[i].value.trim()}" grade's Min % can't be greater than its Max %.`);
+        return;
+      }
+    }
     gradingScale = Array.from(grades).map((el,i) => ({
       grade: el.value.trim(), minPct: Number(mins[i].value)||0, maxPct: Number(maxs[i].value)||0,
     })).filter(g => g.grade);
@@ -10937,6 +10976,18 @@
     if(stfAadharVal && !isValidAadhar(stfAadharVal)){
       showToast('Aadhar Number must be exactly 12 digits.');
       document.getElementById('stfAadhar').focus();
+      return false;
+    }
+    const stfBankAccountVal = g('stfBankAccountNumber').trim();
+    if(stfBankAccountVal && !isValidBankAccount(stfBankAccountVal)){
+      showToast('Account Number must be 6–18 digits.');
+      document.getElementById('stfBankAccountNumber').focus();
+      return false;
+    }
+    const stfBankIfscVal = g('stfBankIfsc').trim().toUpperCase();
+    if(stfBankIfscVal && !isValidIfsc(stfBankIfscVal)){
+      showToast('IFSC Code must be in the format AAAA0999999 — 4 letters, a zero, then 6 letters/digits.');
+      document.getElementById('stfBankIfsc').focus();
       return false;
     }
 
@@ -15711,7 +15762,7 @@
         <h4>Basic Information</h4>
         <div class="form-grid" style="margin-top:12px;">
           <div class="f-field full"><label>School Name *</label><input type="text" id="siName" value="${schoolInfo.name||''}"></div>
-          <div class="f-field"><label>UDISE Code</label><input type="text" id="siUdise" value="${schoolInfo.udise||''}"></div>
+          <div class="f-field"><label>UDISE Code</label><input type="text" id="siUdise" value="${schoolInfo.udise||''}" inputmode="numeric" maxlength="11" oninput="this.value=this.value.replace(/\\D/g,'').slice(0,11)"></div>
           <div class="f-field"><label>School Code</label><input type="text" id="siSchoolCode" value="${schoolInfo.schoolCode||''}"></div>
           <div class="f-field full"><label>Reg. / Affiliation Number</label><input type="text" id="siRegNumber" value="${schoolInfo.regNumber||''}"></div>
         </div>
@@ -15731,7 +15782,7 @@
         <div class="form-grid" style="margin-top:12px;">
           <div class="f-field"><label>State</label><input type="text" id="siState" value="${schoolInfo.state||''}"></div>
           <div class="f-field"><label>District</label><input type="text" id="siDistrict" value="${schoolInfo.district||''}"></div>
-          <div class="f-field"><label>PIN Code</label><input type="text" id="siPin" value="${schoolInfo.pin||''}"></div>
+          <div class="f-field"><label>PIN Code</label><input type="text" id="siPin" value="${schoolInfo.pin||''}" inputmode="numeric" maxlength="6" oninput="this.value=this.value.replace(/\\D/g,'').slice(0,6)"></div>
           <div class="f-field full"><label>Address</label><textarea id="siAddress" rows="2">${schoolInfo.address||''}</textarea></div>
         </div>
       </div>
@@ -15784,6 +15835,18 @@
     if(siPhoneVal && !isValidMobile(siPhoneVal)){
       showToast('Phone must be exactly 10 digits.');
       document.getElementById('siPhone').focus();
+      return;
+    }
+    const siUdiseVal = document.getElementById('siUdise').value.trim();
+    if(siUdiseVal && !isValidUdise(siUdiseVal)){
+      showToast('UDISE Code must be exactly 11 digits.');
+      document.getElementById('siUdise').focus();
+      return;
+    }
+    const siPinVal = document.getElementById('siPin').value.trim();
+    if(siPinVal && !isValidPin(siPinVal)){
+      showToast('PIN Code must be exactly 6 digits.');
+      document.getElementById('siPin').focus();
       return;
     }
     schoolInfo = {
