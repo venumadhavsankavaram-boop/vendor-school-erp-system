@@ -113,6 +113,15 @@ async function ensureSchema() {
     id TEXT PRIMARY KEY, name TEXT, username TEXT, password TEXT, role TEXT,
     linked_student_id TEXT, recovery_code TEXT, created_at TIMESTAMPTZ NOT NULL DEFAULT now()
   )`;
+  // Soft delete: a deleted user's row stays put with deleted_at set, instead
+  // of being erased outright. This closes two real gaps found after an
+  // actual incident — a hard DELETE gave no way back if it was a mistake,
+  // and deleting your own logged-in account left that session looking
+  // "still logged in" until it naturally expired, since nothing previously
+  // re-checked the user still existed mid-session. See handleUsers below
+  // for the restore path, the self-delete/last-admin guards, and the
+  // immediate session wipe that now comes with every delete.
+  await sql`ALTER TABLE users ADD COLUMN IF NOT EXISTS deleted_at TIMESTAMPTZ`;
   await sql`CREATE TABLE IF NOT EXISTS payments (
     id TEXT PRIMARY KEY, receipt_no TEXT, student_id TEXT, student_name TEXT, category TEXT, mode TEXT,
     amount NUMERIC DEFAULT 0, discount NUMERIC DEFAULT 0, instalment TEXT, date TEXT, note TEXT,
@@ -163,6 +172,9 @@ async function ensureSchema() {
     id TEXT PRIMARY KEY, first_name TEXT, last_name TEXT, class_name TEXT, section TEXT, status TEXT,
     admission_no TEXT, extra JSONB NOT NULL DEFAULT '{}'::jsonb, created_at TIMESTAMPTZ NOT NULL DEFAULT now()
   )`;
+  // Same soft-delete treatment as users — see the ALTER TABLE users comment
+  // above and HYBRID_RESOURCES.students' softDelete flag below.
+  await sql`ALTER TABLE students ADD COLUMN IF NOT EXISTS deleted_at TIMESTAMPTZ`;
   await sql`CREATE TABLE IF NOT EXISTS staff (
     id TEXT PRIMARY KEY, first_name TEXT, last_name TEXT, department TEXT, designation TEXT, status TEXT,
     staff_id TEXT, extra JSONB NOT NULL DEFAULT '{}'::jsonb, created_at TIMESTAMPTZ NOT NULL DEFAULT now()
@@ -390,6 +402,9 @@ async function ensureSchema() {
   await sql`CREATE INDEX IF NOT EXISTS idx_audit_log_created_at ON audit_log (created_at DESC)`;
   await sql`CREATE INDEX IF NOT EXISTS idx_audit_log_resource ON audit_log (resource)`;
   await sql`CREATE INDEX IF NOT EXISTS idx_sessions_expires_at ON sessions (expires_at)`;
+  await sql`CREATE INDEX IF NOT EXISTS idx_sessions_user_id ON sessions (user_id)`;
+  await sql`CREATE INDEX IF NOT EXISTS idx_users_deleted_at ON users (deleted_at)`;
+  await sql`CREATE INDEX IF NOT EXISTS idx_students_deleted_at ON students (deleted_at)`;
   await sql`CREATE INDEX IF NOT EXISTS idx_acct_income_date ON acct_income (date)`;
   await sql`CREATE INDEX IF NOT EXISTS idx_acct_expenses_date ON acct_expenses (date)`;
   await sql`CREATE INDEX IF NOT EXISTS idx_student_concerns_student_id ON student_concerns (student_id)`;
@@ -816,6 +831,11 @@ const SIMPLE_RESOURCES = {
 const HYBRID_RESOURCES = {
   students: {
     table: 'students',
+    // Opts this one resource into handleHybrid's soft-delete path (see
+    // below) — every other hybrid resource keeps its existing hard DELETE
+    // unchanged, since this fix is scoped to the two record types a real
+    // incident actually happened to (students, and users just below).
+    softDelete: true,
     core: [
       { app: 'id', col: 'id' }, { app: 'firstName', col: 'first_name' }, { app: 'lastName', col: 'last_name' },
       { app: 'className', col: 'class_name' }, { app: 'section', col: 'section' }, { app: 'status', col: 'status' },
@@ -1138,7 +1158,16 @@ async function handleUsers(req, res) {
   const config = SIMPLE_RESOURCES.users;
   const { table, fields } = config;
   if (req.method === 'GET') {
-    const rows = await sql.query(`SELECT * FROM ${table} ORDER BY created_at ASC NULLS LAST`);
+    // ?trash=1 lists soft-deleted accounts for the Recently Deleted view
+    // instead of the normal active roster — Admin-only, same as this whole
+    // resource already is (see the resource==='users' gate further up).
+    const trashMode = req.query.trash === '1';
+    if (trashMode && (!req.authUser || req.authUser.role !== 'Admin')) {
+      return res.status(403).json({ error: 'Admin access required.' });
+    }
+    const rows = await sql.query(
+      `SELECT * FROM ${table} WHERE deleted_at IS ${trashMode ? 'NOT NULL' : 'NULL'} ORDER BY created_at ASC NULLS LAST`
+    );
     return res.status(200).json(rows.map(r => {
       const shaped = simpleToAppShape(r, fields);
       delete shaped.password;
@@ -1146,6 +1175,17 @@ async function handleUsers(req, res) {
     }));
   }
   if (req.method === 'POST' || req.method === 'PUT') {
+    // A restore is a bodyless PUT carrying ?restore=1 — the mirror image of
+    // the soft delete below, just clearing deleted_at back to NULL.
+    if (req.method === 'PUT' && req.query.restore === '1') {
+      if (!req.authUser || req.authUser.role !== 'Admin') {
+        return res.status(403).json({ error: 'Admin access required.' });
+      }
+      const { id } = req.query;
+      if (!id) return res.status(400).json({ error: 'Missing id.' });
+      await sql`UPDATE users SET deleted_at = NULL WHERE id = ${id}`;
+      return res.status(200).json({ ok: true });
+    }
     const body = { ...(req.body || {}) };
     if (!body.id) return res.status(400).json({ error: 'Missing id.' });
     if (req.method === 'POST') {
@@ -1173,7 +1213,29 @@ async function handleUsers(req, res) {
   if (req.method === 'DELETE') {
     const { id } = req.query;
     if (!id) return res.status(400).json({ error: 'Missing id.' });
-    await sql`DELETE FROM users WHERE id = ${id}`;
+    // Three guards added after a real incident: deleting your own
+    // currently-logged-in account left that session looking "still logged
+    // in" until it expired on its own (nothing previously re-checked the
+    // user still existed mid-session); deleting the last remaining Admin
+    // would lock everyone out with no way back in; and a hard DELETE gave
+    // no way to undo either mistake. Soft delete plus an immediate session
+    // wipe closes all three at once.
+    if (req.authUser && String(req.authUser.id) === String(id)) {
+      return res.status(400).json({ error: "You can't delete your own account while logged in as it. Log in as a different Admin first." });
+    }
+    const target = await sql`SELECT role FROM users WHERE id = ${id} AND deleted_at IS NULL`;
+    if (!target.length) return res.status(404).json({ error: 'User not found.' });
+    if (target[0].role === 'Admin') {
+      const activeAdmins = await sql`SELECT count(*)::int AS c FROM users WHERE role = 'Admin' AND deleted_at IS NULL`;
+      if (activeAdmins[0].c <= 1) {
+        return res.status(400).json({ error: "You can't delete the last remaining Admin account — create another Admin first." });
+      }
+    }
+    await sql`UPDATE users SET deleted_at = now() WHERE id = ${id}`;
+    // Whatever session(s) this account is signed in on, elsewhere or right
+    // now, stop working on their very next request instead of coasting on
+    // a stale cookie until it naturally times out.
+    await sql`DELETE FROM sessions WHERE user_id = ${id}`;
     return res.status(200).json({ ok: true });
   }
   return res.status(405).json({ error: 'Method not allowed.' });
@@ -1194,12 +1256,31 @@ function splitCoreExtra(body, core) {
   return { coreVals, extra };
 }
 async function handleHybrid(req, res, config) {
-  const { table, core } = config;
+  const { table, core, softDelete } = config;
   if (req.method === 'GET') {
-    const rows = await sql.query(`SELECT * FROM ${table} ORDER BY created_at ASC NULLS LAST`);
+    // ?trash=1 (Admin/Principal only) lists soft-deleted records for the
+    // Recently Deleted view — only meaningful for a resource that opted
+    // into softDelete (see HYBRID_RESOURCES.students above); every other
+    // hybrid resource ignores the query param entirely, unchanged.
+    const trashMode = softDelete && req.query.trash === '1';
+    if (trashMode && (!req.authUser || !MANAGEMENT_ROLES.includes(req.authUser.role))) {
+      return res.status(403).json({ error: 'Admin or Principal access required to view deleted records.' });
+    }
+    const whereClause = softDelete ? `WHERE deleted_at IS ${trashMode ? 'NOT NULL' : 'NULL'}` : '';
+    const rows = await sql.query(`SELECT * FROM ${table} ${whereClause} ORDER BY created_at ASC NULLS LAST`);
     return res.status(200).json(rows.map(r => hybridToAppShape(r, core)));
   }
   if (req.method === 'POST' || req.method === 'PUT') {
+    // A restore is a bodyless PUT carrying ?restore=1 — mirrors handleUsers.
+    if (softDelete && req.method === 'PUT' && req.query.restore === '1') {
+      if (!req.authUser || !MANAGEMENT_ROLES.includes(req.authUser.role)) {
+        return res.status(403).json({ error: 'Admin or Principal access required to restore a deleted record.' });
+      }
+      const { id } = req.query;
+      if (!id) return res.status(400).json({ error: 'Missing id.' });
+      await sql.query(`UPDATE ${table} SET deleted_at = NULL WHERE id = $1`, [id]);
+      return res.status(200).json({ ok: true });
+    }
     const body = req.body || {};
     if (!body.id) return res.status(400).json({ error: 'Missing id.' });
     const { coreVals, extra } = splitCoreExtra(body, core);
@@ -1225,7 +1306,11 @@ async function handleHybrid(req, res, config) {
   if (req.method === 'DELETE') {
     const { id } = req.query;
     if (!id) return res.status(400).json({ error: 'Missing id.' });
-    await sql.query(`DELETE FROM ${table} WHERE id = $1`, [id]);
+    if (softDelete) {
+      await sql.query(`UPDATE ${table} SET deleted_at = now() WHERE id = $1`, [id]);
+    } else {
+      await sql.query(`DELETE FROM ${table} WHERE id = $1`, [id]);
+    }
     return res.status(200).json({ ok: true });
   }
   return res.status(405).json({ error: 'Method not allowed.' });
@@ -1727,7 +1812,7 @@ async function runFeeDueReminders() {
   if (today === beforeStr) kind = 'fee_due_before';
   else if (today > dueDate) kind = 'fee_due_after';
   if (!kind) return;
-  const students = await sql`SELECT * FROM students WHERE status IS NULL OR LOWER(status) = 'active'`;
+  const students = await sql`SELECT * FROM students WHERE (status IS NULL OR LOWER(status) = 'active') AND deleted_at IS NULL`;
   for (const student of students) {
     try {
       const balance = await computeStudentDueBalance(student);
@@ -2049,7 +2134,7 @@ app.post('/api/login', async (req, res) => {
       const mins = Math.ceil(blockedForSeconds / 60);
       return res.status(429).json({ error: `Too many failed attempts. Try again in ${mins} minute${mins === 1 ? '' : 's'}.` });
     }
-    const rows = await sql`SELECT * FROM users WHERE LOWER(username) = LOWER(${String(username)})`;
+    const rows = await sql`SELECT * FROM users WHERE LOWER(username) = LOWER(${String(username)}) AND deleted_at IS NULL`;
     if (!rows.length) { recordLoginFailure(rateKey); return res.status(401).json({ error: 'Invalid username or password.' }); }
     const user = rows[0];
     const ok = await bcrypt.compare(String(password), user.password || '');
@@ -2274,7 +2359,7 @@ async function getLinkedStudent(userId) {
   const userRows = await sql`SELECT linked_student_id FROM users WHERE id = ${userId}`;
   const studentId = userRows.length ? userRows[0].linked_student_id : '';
   if (!studentId) return null;
-  const studentRows = await sql`SELECT * FROM students WHERE id = ${studentId}`;
+  const studentRows = await sql`SELECT * FROM students WHERE id = ${studentId} AND deleted_at IS NULL`;
   return studentRows.length ? studentRows[0] : null;
 }
 // ---------- Teacher self-service scoping: homeroom attendance & assigned-subject marks ----------
@@ -2579,7 +2664,7 @@ app.get('/api/me', async (req, res) => {
     if (req.authUser.id === 'vendor-support') {
       return res.status(200).json({ id: 'vendor-support', role: req.authUser.role, name: req.authUser.name });
     }
-    const rows = await sql`SELECT * FROM users WHERE id = ${req.authUser.id}`;
+    const rows = await sql`SELECT * FROM users WHERE id = ${req.authUser.id} AND deleted_at IS NULL`;
     if (!rows.length) return res.status(401).json({ error: 'Account no longer exists.' });
     const shaped = simpleToAppShape(rows[0], SIMPLE_RESOURCES.users.fields);
     delete shaped.password;
@@ -2706,10 +2791,14 @@ app.all('/api/:resource', async (req, res) => {
     const actorName = req.authUser ? req.authUser.name : (decodeHeaderValue(req.headers['x-actor-name']) || '(unknown)');
     const actorRole = req.authUser ? req.authUser.role : (decodeHeaderValue(req.headers['x-actor-role']) || '');
     const recordId = (req.body && req.body.id) || req.query.id || null;
+    // A soft-delete restore travels over the wire as a PUT (see handleUsers
+    // / handleHybrid below) but reads far more clearly in the audit trail
+    // under its own verb than lumped in with ordinary edits.
+    const auditMethod = (req.method === 'PUT' && req.query.restore === '1') ? 'RESTORE' : req.method;
     res.on('finish', () => {
       if (res.statusCode >= 400) return;
       sql`INSERT INTO audit_log (actor_name, actor_role, method, resource, record_id)
-          VALUES (${actorName}, ${actorRole}, ${req.method}, ${resource}, ${recordId ? String(recordId) : null})`
+          VALUES (${actorName}, ${actorRole}, ${auditMethod}, ${resource}, ${recordId ? String(recordId) : null})`
         .catch(err => console.error('audit log insert failed:', err));
     });
   }
@@ -2784,7 +2873,7 @@ app.all('/api/:resource', async (req, res) => {
         }
       });
       if (!pairs.length) return res.status(200).json([]);
-      const rows = await sql`SELECT * FROM students`;
+      const rows = await sql`SELECT * FROM students WHERE deleted_at IS NULL`;
       const filtered = rows.filter(r => pairs.some(p => p.className === r.class_name && p.section === r.section));
       return res.status(200).json(filtered.map(r => hybridToAppShape(r, HYBRID_RESOURCES.students.core)));
     }

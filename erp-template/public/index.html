@@ -1141,6 +1141,7 @@
             <button type="button" id="btnExportStudentsPDF" onclick="exportStudentsPDF()">Export Students (PDF)</button>
             <button type="button" onclick="openTransferCertPicker()">Transfer Certificates</button>
             <button type="button" onclick="openDuplicatesModal()">Find Duplicate Students</button>
+            <button type="button" onclick="openTrashModal('students')">Recently Deleted Students</button>
           </div>
         </div>
         <input type="file" id="importFileInput" accept=".xlsx,.xls,.csv" style="display:none;" onchange="importExcel(event)">
@@ -2248,6 +2249,20 @@
           <button type="submit" class="btn btn-primary">Save Exam</button>
         </div>
       </form>
+    </div>
+  </div>
+</div>
+
+<div class="modal-overlay" id="trashModalOverlay">
+  <div class="modal" style="max-width:640px;">
+    <div class="modal-inner">
+      <button class="modal-close" onclick="closeTrashModal()">&times;</button>
+      <h2 id="trashModalTitle">Recently Deleted</h2>
+      <p class="modal-sub">Deleted records are kept here, not erased, until restored — nothing here is removed automatically.</p>
+      <div id="trashModalBody" style="max-height:440px; overflow-y:auto;"></div>
+      <div class="modal-actions">
+        <button type="button" class="btn btn-ghost" onclick="closeTrashModal()">Close</button>
+      </div>
     </div>
   </div>
 </div>
@@ -16021,6 +16036,7 @@
         Looking for a student or parent login? Head to <a onclick="switchView('studentparentlogins')" style="cursor:pointer; color:var(--magenta); font-weight:600;">Student/Parent Logins</a>${studentParentCount ? ` — ${studentParentCount} of them there right now` : ''}.
       </p>
       <button class="btn btn-primary" style="margin-bottom:16px;" onclick="openUserModal(undefined, undefined, undefined, 'staff')">+ Add User</button>
+      <button class="btn btn-ghost" style="margin-bottom:16px; margin-left:8px;" onclick="openTrashModal('users')">🗑 Recently Deleted</button>
       <div class="table-wrap">
         <table>
           <thead><tr><th>Name</th><th>Username</th><th>Role</th><th></th></tr></thead>
@@ -18064,6 +18080,80 @@
     };
     reader.readAsArrayBuffer(file);
     document.getElementById('moreActionsMenu').classList.remove('open');
+  }
+
+  // ===== Recently Deleted (soft-delete trash + restore) =====
+  // Students and Users are soft-deleted server-side (see server.js) after a
+  // real incident where a hard delete gave no way back from a mistake.
+  // This modal is the one place both resources' "Recently Deleted" list
+  // and Restore action live, since the two are otherwise identical.
+  let _trashResource = '';
+  const TRASH_CONFIG = {
+    students: {
+      apiPath: '/api/students',
+      title: 'Recently Deleted Students',
+      label: s => `${s.firstName||''} ${s.lastName||''}`.trim() || '(no name)',
+      meta: s => `${s.className||'—'} — Section ${s.section||'—'} · Admission No: ${s.admissionNo||'—'}`,
+      onRestored: async () => { await loadStudents(); renderDashboard(); renderAdmissionsBody(); },
+    },
+    users: {
+      apiPath: '/api/users',
+      title: 'Recently Deleted Users',
+      label: u => u.name || u.username || '(no name)',
+      meta: u => `${u.username||'—'} · ${u.role||'—'}`,
+      onRestored: async () => { await loadUsers(); refreshUserListViews(); },
+    },
+  };
+  async function openTrashModal(resource){
+    _trashResource = resource;
+    document.getElementById('trashModalTitle').textContent = TRASH_CONFIG[resource].title;
+    document.getElementById('trashModalOverlay').classList.add('open');
+    const menu = document.getElementById('moreActionsMenu');
+    if(menu) menu.classList.remove('open');
+    await renderTrashModal();
+  }
+  function closeTrashModal(){
+    document.getElementById('trashModalOverlay').classList.remove('open');
+  }
+  async function renderTrashModal(){
+    const cfg = TRASH_CONFIG[_trashResource];
+    const body = document.getElementById('trashModalBody');
+    body.innerHTML = `<div class="empty-state"><b>Loading…</b></div>`;
+    let rows = [];
+    try{
+      const res = await fetch(cfg.apiPath + '?trash=1');
+      if(!res.ok) throw new Error('Request failed (' + res.status + ')');
+      rows = await res.json();
+    }catch(e){
+      body.innerHTML = `<div class="empty-state"><b>Could not load</b>${e.message}</div>`;
+      return;
+    }
+    if(!rows.length){
+      body.innerHTML = `<div class="empty-state"><b>Nothing here</b>No deleted records right now.</div>`;
+      return;
+    }
+    body.innerHTML = rows.map(r => `
+      <div class="list-manage-row">
+        <div style="font-size:0.82rem;">
+          <div class="lm-name">${cfg.label(r)}</div>
+          <div class="lm-meta">${cfg.meta(r)}</div>
+        </div>
+        <div style="display:flex; gap:10px;">
+          <button class="btn btn-primary btn-sm" onclick="restoreTrashedRecord('${r.id}')">Restore</button>
+        </div>
+      </div>
+    `).join('');
+  }
+  async function restoreTrashedRecord(id){
+    const cfg = TRASH_CONFIG[_trashResource];
+    try{
+      await throwIfNotOk(await fetch(cfg.apiPath + '?id=' + encodeURIComponent(id) + '&restore=1', { method:'PUT', headers: actorHeaders() }));
+      showToast('Restored.');
+      await cfg.onRestored();
+      await renderTrashModal();
+    }catch(e){
+      showToast('Could not restore (' + e.message + ').');
+    }
   }
 
   function openDuplicatesModal(){
