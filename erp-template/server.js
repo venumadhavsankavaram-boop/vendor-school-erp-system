@@ -175,6 +175,36 @@ async function ensureSchema() {
   // Same soft-delete treatment as users — see the ALTER TABLE users comment
   // above and HYBRID_RESOURCES.students' softDelete flag below.
   await sql`ALTER TABLE students ADD COLUMN IF NOT EXISTS deleted_at TIMESTAMPTZ`;
+  // A student record is never deleted on a single click — see
+  // HYBRID_RESOURCES.students' deleteViaApprovalOnly flag and
+  // handleDeletionRequests below. Getting from "requested" to "actually
+  // deleted" takes THREE different people's say-so: whoever files the
+  // request, then a first Admin/Principal approval, then a second
+  // Admin/Principal approval — no one may fill more than one of those
+  // three roles for the same request, Admin included. Nothing here is
+  // erased until both approvals land — the actual removal still lands on
+  // the same reversible deleted_at soft-delete above, never a hard DELETE.
+  await sql`CREATE TABLE IF NOT EXISTS deletion_requests (
+    id TEXT PRIMARY KEY, resource TEXT NOT NULL, record_id TEXT NOT NULL, record_label TEXT, reason TEXT,
+    requested_by TEXT, requested_by_name TEXT, requested_at TIMESTAMPTZ NOT NULL DEFAULT now(),
+    status TEXT NOT NULL DEFAULT 'Pending',
+    first_approved_by TEXT, first_approved_by_name TEXT, first_approved_at TIMESTAMPTZ,
+    decided_by TEXT, decided_by_name TEXT, decided_at TIMESTAMPTZ, decision_note TEXT
+  )`;
+  await sql`CREATE INDEX IF NOT EXISTS idx_deletion_requests_status ON deletion_requests (status)`;
+  // Certificate register — every Study/Transfer Certificate issued is logged
+  // here with a snapshot of the student's details at the moment of issue
+  // (so a later data correction never rewrites what an already-printed
+  // certificate said) and a sequential per-type, per-year serial number.
+  // This is what makes "we can still prove what we issued and when" true
+  // even long after a student has left — see handleCertificates below.
+  await sql`CREATE TABLE IF NOT EXISTS certificates_issued (
+    id TEXT PRIMARY KEY, type TEXT NOT NULL, serial_no TEXT NOT NULL,
+    resource TEXT NOT NULL, record_id TEXT NOT NULL, snapshot JSONB NOT NULL DEFAULT '{}'::jsonb,
+    conduct TEXT, purpose TEXT, academic_year TEXT,
+    issued_by TEXT, issued_by_name TEXT, issued_at TIMESTAMPTZ NOT NULL DEFAULT now()
+  )`;
+  await sql`CREATE INDEX IF NOT EXISTS idx_certificates_issued_record ON certificates_issued (resource, record_id)`;
   await sql`CREATE TABLE IF NOT EXISTS staff (
     id TEXT PRIMARY KEY, first_name TEXT, last_name TEXT, department TEXT, designation TEXT, status TEXT,
     staff_id TEXT, extra JSONB NOT NULL DEFAULT '{}'::jsonb, created_at TIMESTAMPTZ NOT NULL DEFAULT now()
@@ -836,6 +866,13 @@ const HYBRID_RESOURCES = {
     // unchanged, since this fix is scoped to the two record types a real
     // incident actually happened to (students, and users just below).
     softDelete: true,
+    // A direct DELETE to /api/students is refused unconditionally (see the
+    // DELETE branch of handleHybrid below) — even for Admin. The only way
+    // deleted_at ever gets set on a student is handleDeletionRequests
+    // approving a pending request from a second person. This is separate
+    // from softDelete above: softDelete governs what a successful deletion
+    // *does* (soft, reversible); this governs who may *trigger* one at all.
+    deleteViaApprovalOnly: true,
     core: [
       { app: 'id', col: 'id' }, { app: 'firstName', col: 'first_name' }, { app: 'lastName', col: 'last_name' },
       { app: 'className', col: 'class_name' }, { app: 'section', col: 'section' }, { app: 'status', col: 'status' },
@@ -960,6 +997,8 @@ const RESOURCE_TO_MODULE = {
   'exam-room-config': ['result'],
   // People
   students: ['admissions'],
+  'deletion-requests': ['admissions'],
+  certificates: ['admissions'],
   // Admission inquiries are the public website's "Admissions Inquiry Form"
   // submissions, reviewed under Website Inquiries in the sidebar (see
   // canDo('websiteinquiries', ...) in renderAdmissionInquiries) — NOT the
@@ -1256,7 +1295,7 @@ function splitCoreExtra(body, core) {
   return { coreVals, extra };
 }
 async function handleHybrid(req, res, config) {
-  const { table, core, softDelete } = config;
+  const { table, core, softDelete, deleteViaApprovalOnly } = config;
   if (req.method === 'GET') {
     // ?trash=1 (Admin/Principal only) lists soft-deleted records for the
     // Recently Deleted view — only meaningful for a resource that opted
@@ -1304,6 +1343,16 @@ async function handleHybrid(req, res, config) {
     }
   }
   if (req.method === 'DELETE') {
+    // See HYBRID_RESOURCES.students' deleteViaApprovalOnly comment — this
+    // path is refused unconditionally, Admin included, no matter who or
+    // what is calling it (the UI's own request-a-deletion flow, an old
+    // cached client, or a direct API call). The only way in is
+    // handleDeletionRequests recording two separate Admin/Principal
+    // approvals on a pending request, which updates deleted_at itself and
+    // never routes back through here.
+    if (deleteViaApprovalOnly) {
+      return res.status(403).json({ error: 'This record can only be deleted through a deletion request approved twice, by two different Admins/Principals — see Recently Deleted / Pending Deletion Requests.' });
+    }
     const { id } = req.query;
     if (!id) return res.status(400).json({ error: 'Missing id.' });
     if (softDelete) {
@@ -1312,6 +1361,195 @@ async function handleHybrid(req, res, config) {
       await sql.query(`DELETE FROM ${table} WHERE id = $1`, [id]);
     }
     return res.status(200).json({ ok: true });
+  }
+  return res.status(405).json({ error: 'Method not allowed.' });
+}
+
+// ---------- Deletion requests (two-person approval for deleteViaApprovalOnly resources) ----------
+// A student record is never removed on one person's say-so, and never on
+// just ONE other person's say-so either: requesting, the first approval,
+// and the final approval must be three different people, and only
+// Admin/Principal may approve at either stage (see MANAGEMENT_ROLES below)
+// — Admin included, no exceptions. A request moves
+// Pending -> "Pending Final Approval" (after the first approval) ->
+// Approved (after a second, different Admin/Principal approves again) or
+// Rejected (at either stage). Approval performs the same reversible
+// soft-delete handleHybrid always did — nothing about *what* a deletion
+// does has changed, only how many people, and who, may set it off.
+const DELETION_REQUEST_TARGETS = {
+  students: {
+    table: 'students',
+    label: row => `${row.first_name || ''} ${row.last_name || ''}`.trim() + (row.admission_no ? ` (Adm# ${row.admission_no})` : ''),
+  },
+};
+function shapeDeletionRequest(r) {
+  return {
+    id: r.id, resource: r.resource, recordId: r.record_id, recordLabel: r.record_label, reason: r.reason,
+    requestedBy: r.requested_by, requestedByName: r.requested_by_name, requestedAt: r.requested_at,
+    status: r.status,
+    firstApprovedBy: r.first_approved_by, firstApprovedByName: r.first_approved_by_name, firstApprovedAt: r.first_approved_at,
+    decidedBy: r.decided_by, decidedByName: r.decided_by_name, decidedAt: r.decided_at,
+    decisionNote: r.decision_note,
+  };
+}
+async function handleDeletionRequests(req, res) {
+  if (!req.authUser) return res.status(401).json({ error: 'Not signed in.' });
+  if (req.method === 'GET') {
+    // Admin/Principal see every request (they're the ones who act on them);
+    // anyone else sees only the requests they personally filed, so they can
+    // check whether theirs was approved/rejected without seeing the rest
+    // of the school's queue.
+    const rows = MANAGEMENT_ROLES.includes(req.authUser.role)
+      ? await sql`SELECT * FROM deletion_requests ORDER BY requested_at DESC LIMIT 200`
+      : await sql`SELECT * FROM deletion_requests WHERE requested_by = ${req.authUser.id} ORDER BY requested_at DESC LIMIT 200`;
+    return res.status(200).json(rows.map(shapeDeletionRequest));
+  }
+  if (req.method === 'POST') {
+    const { resource: targetResource, recordId, reason } = req.body || {};
+    const target = DELETION_REQUEST_TARGETS[targetResource];
+    if (!target) return res.status(400).json({ error: 'Unsupported record type for a deletion request.' });
+    if (!recordId) return res.status(400).json({ error: 'Missing recordId.' });
+    if (!reason || !String(reason).trim()) return res.status(400).json({ error: 'A reason is required.' });
+    const already = await sql`SELECT id FROM deletion_requests WHERE resource = ${targetResource} AND record_id = ${String(recordId)} AND status IN ('Pending', 'Pending Final Approval')`;
+    if (already.length) return res.status(409).json({ error: 'A deletion request for this record is already pending approval.' });
+    const rows = await sql.query(`SELECT * FROM ${target.table} WHERE id = $1 AND deleted_at IS NULL`, [recordId]);
+    if (!rows.length) return res.status(404).json({ error: 'Record not found — it may already be deleted.' });
+    const id = 'delreq_' + Date.now() + '_' + crypto.randomBytes(4).toString('hex');
+    await sql`
+      INSERT INTO deletion_requests (id, resource, record_id, record_label, reason, requested_by, requested_by_name)
+      VALUES (${id}, ${targetResource}, ${String(recordId)}, ${target.label(rows[0])}, ${String(reason).trim()}, ${req.authUser.id}, ${req.authUser.name})
+    `;
+    return res.status(201).json({ ok: true, id });
+  }
+  if (req.method === 'PUT') {
+    if (!MANAGEMENT_ROLES.includes(req.authUser.role)) {
+      return res.status(403).json({ error: 'Admin or Principal access required to decide a deletion request.' });
+    }
+    const { id } = req.query;
+    if (!id) return res.status(400).json({ error: 'Missing id.' });
+    const { decision, note } = req.body || {};
+    if (decision !== 'Approve' && decision !== 'Reject') return res.status(400).json({ error: 'decision must be "Approve" or "Reject".' });
+    const rows = await sql`SELECT * FROM deletion_requests WHERE id = ${id}`;
+    if (!rows.length) return res.status(404).json({ error: 'Request not found.' });
+    const reqRow = rows[0];
+    if (reqRow.status === 'Approved' || reqRow.status === 'Rejected') {
+      return res.status(409).json({ error: `This request was already ${reqRow.status.toLowerCase()}.` });
+    }
+    // No single person may fill more than one of the three roles on the
+    // same request — this is what actually stops a unilateral deletion,
+    // Admin included:
+    //  1. the requester can never also approve their own request, at
+    //     either stage;
+    //  2. whoever gave the first approval can never also give the final,
+    //     second approval on that same request.
+    if (reqRow.requested_by === req.authUser.id) {
+      return res.status(403).json({ error: 'You requested this deletion — a different Admin or Principal must review it.' });
+    }
+    if (reqRow.status === 'Pending Final Approval' && reqRow.first_approved_by === req.authUser.id) {
+      return res.status(403).json({ error: 'You already gave the first approval on this request — a different Admin or Principal must give the final approval.' });
+    }
+    if (decision === 'Reject') {
+      await sql`
+        UPDATE deletion_requests SET status = 'Rejected',
+          decided_by = ${req.authUser.id}, decided_by_name = ${req.authUser.name}, decided_at = now(),
+          decision_note = ${note ? String(note).trim() : null}
+        WHERE id = ${id}
+      `;
+      return res.status(200).json({ ok: true, status: 'Rejected' });
+    }
+    // decision === 'Approve'
+    if (reqRow.status === 'Pending') {
+      // First approval only — nothing is deleted yet. A second, different
+      // Admin/Principal must approve again before this actually happens.
+      await sql`
+        UPDATE deletion_requests SET status = 'Pending Final Approval',
+          first_approved_by = ${req.authUser.id}, first_approved_by_name = ${req.authUser.name}, first_approved_at = now()
+        WHERE id = ${id}
+      `;
+      return res.status(200).json({ ok: true, status: 'Pending Final Approval' });
+    }
+    // reqRow.status === 'Pending Final Approval' — this is the second,
+    // final approval, so this is the only branch that actually deletes.
+    const target = DELETION_REQUEST_TARGETS[reqRow.resource];
+    if (target) await sql.query(`UPDATE ${target.table} SET deleted_at = now() WHERE id = $1`, [reqRow.record_id]);
+    await sql`
+      UPDATE deletion_requests SET status = 'Approved',
+        decided_by = ${req.authUser.id}, decided_by_name = ${req.authUser.name}, decided_at = now(),
+        decision_note = ${note ? String(note).trim() : null}
+      WHERE id = ${id}
+    `;
+    return res.status(200).json({ ok: true, status: 'Approved' });
+  }
+  return res.status(405).json({ error: 'Method not allowed.' });
+}
+
+// ---------- Certificate register (Study / Transfer / Bonafide certificates) ----------
+// Every certificate issued for a student is logged here with a snapshot of
+// their details at the moment of issue (so a later correction to the live
+// record never rewrites what an already-printed certificate said) and a
+// sequential, per-type, per-calendar-year serial number. This is what lets
+// the school prove what was issued, to whom, and when — including long
+// after a student has gone Inactive, since Inactive students are never
+// removed from the roster (only an approved deletion request removes a
+// record, and that's a separate, rare, two-approval action).
+const CERTIFICATE_TARGETS = {
+  students: {
+    table: 'students',
+    label: row => `${row.first_name || ''} ${row.last_name || ''}`.trim() + (row.admission_no ? ` (Adm# ${row.admission_no})` : ''),
+    buildSnapshot: row => {
+      const extra = row.extra || {};
+      return {
+        firstName: row.first_name || '', lastName: row.last_name || '', admissionNo: row.admission_no || '',
+        className: row.class_name || '', section: row.section || '', status: row.status || '',
+        fatherName: extra.fatherName || '', motherName: extra.motherName || '',
+        dob: extra.dob || '', admDate: extra.admDate || '', gender: extra.gender || '',
+      };
+    },
+  },
+};
+function shapeCertificate(r) {
+  return {
+    id: r.id, type: r.type, serialNo: r.serial_no, resource: r.resource, recordId: r.record_id,
+    snapshot: r.snapshot || {}, conduct: r.conduct, purpose: r.purpose, academicYear: r.academic_year,
+    issuedBy: r.issued_by, issuedByName: r.issued_by_name, issuedAt: r.issued_at,
+  };
+}
+async function nextCertificateSerial(type) {
+  const year = new Date().getFullYear();
+  const rows = await sql`SELECT COUNT(*)::int AS n FROM certificates_issued WHERE type = ${type} AND EXTRACT(YEAR FROM issued_at) = ${year}`;
+  const seq = (rows[0] && rows[0].n ? rows[0].n : 0) + 1;
+  const prefix = type === 'Transfer' ? 'TC' : type === 'Bonafide' ? 'BC' : 'SC';
+  return `${prefix}/${year}/${String(seq).padStart(4, '0')}`;
+}
+async function handleCertificates(req, res) {
+  if (!req.authUser) return res.status(401).json({ error: 'Not signed in.' });
+  if (req.method === 'GET') {
+    const { resource: filterResource, recordId: filterRecordId } = req.query;
+    const rows = (filterResource && filterRecordId)
+      ? await sql`SELECT * FROM certificates_issued WHERE resource = ${filterResource} AND record_id = ${String(filterRecordId)} ORDER BY issued_at DESC LIMIT 200`
+      : await sql`SELECT * FROM certificates_issued ORDER BY issued_at DESC LIMIT 200`;
+    return res.status(200).json(rows.map(shapeCertificate));
+  }
+  if (req.method === 'POST') {
+    const { type, resource: targetResource, recordId, conduct, purpose, academicYear } = req.body || {};
+    const target = CERTIFICATE_TARGETS[targetResource];
+    if (!target) return res.status(400).json({ error: 'Unsupported record type for a certificate.' });
+    if (!recordId) return res.status(400).json({ error: 'Missing recordId.' });
+    const certType = (type && String(type).trim()) || 'Study';
+    // Deliberately not filtered by deleted_at — a certificate can still be
+    // produced for a record that was later (properly, two-approval) removed,
+    // since the row itself is only ever soft-deleted, never erased.
+    const rows = await sql.query(`SELECT * FROM ${target.table} WHERE id = $1`, [recordId]);
+    if (!rows.length) return res.status(404).json({ error: 'Record not found.' });
+    const row = rows[0];
+    const id = 'cert_' + Date.now() + '_' + crypto.randomBytes(4).toString('hex');
+    const serialNo = await nextCertificateSerial(certType);
+    const snapshot = target.buildSnapshot(row);
+    await sql`
+      INSERT INTO certificates_issued (id, type, serial_no, resource, record_id, snapshot, conduct, purpose, academic_year, issued_by, issued_by_name)
+      VALUES (${id}, ${certType}, ${serialNo}, ${targetResource}, ${String(recordId)}, ${JSON.stringify(snapshot)}::jsonb, ${conduct ? String(conduct).trim() : null}, ${purpose ? String(purpose).trim() : null}, ${academicYear ? String(academicYear).trim() : null}, ${req.authUser.id}, ${req.authUser.name})
+    `;
+    return res.status(201).json({ ok: true, id, serialNo, snapshot });
   }
   return res.status(405).json({ error: 'Method not allowed.' });
 }
@@ -2995,6 +3233,8 @@ app.all('/api/:resource', async (req, res) => {
     // by handleUsers above), but takes its own dedicated handler instead of
     // the generic one because of the password rules described there.
     if (resource === 'users') return await handleUsers(req, res);
+    if (resource === 'deletion-requests') return await handleDeletionRequests(req, res);
+    if (resource === 'certificates') return await handleCertificates(req, res);
     if (SIMPLE_RESOURCES[resource]) return await handleSimple(req, res, SIMPLE_RESOURCES[resource], resource);
     if (HYBRID_RESOURCES[resource]) return await handleHybrid(req, res, HYBRID_RESOURCES[resource]);
     if (resource === 'subjects') return await handleSubjects(req, res);
