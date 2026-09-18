@@ -18246,12 +18246,18 @@
     }
   }
 
-  // ===== Pending Deletion Requests (four-eyes approval) =====
-  // Requesting and approving a student's deletion are always two different
-  // people — server.js's handleDeletionRequests refuses the same person
-  // doing both, even an Admin. Admin/Principal see and act on every
-  // request here; anyone else sees only the ones they personally filed, so
-  // they can check whether theirs went through without seeing the queue.
+  // ===== Pending Deletion Requests (3-step deletion) =====
+  // Deleting a student takes three distinct, deliberate steps — request
+  // (with a reason), a first confirmation, and a final confirmation that
+  // requires typing the record's own Admission No back — logged with who
+  // did each step and when. The same single Admin/Principal can do all
+  // three themselves in one sitting (see server.js's handleDeletionRequests
+  // for why this no longer requires a second, different person); a second
+  // Admin/Principal can still do a later step instead, if the school has
+  // one and wants to. Admin/Principal see and act on every request here;
+  // anyone else sees only the ones they personally filed, so they can
+  // check whether theirs went through without seeing the queue.
+  let _deletionRequestsCache = [];
   function openDeletionRequestsModal(){
     document.getElementById('deletionRequestsModalOverlay').classList.add('open');
     const menu = document.getElementById('moreActionsMenu');
@@ -18265,14 +18271,15 @@
     const body = document.getElementById('deletionRequestsModalBody');
     const isManagement = currentUser && ['Admin','Principal'].includes(currentUser.role);
     document.getElementById('deletionRequestsModalSub').textContent = isManagement
-      ? 'A record is only ever deleted once TWO different Admins/Principals approve the request, one after the other — neither the requester nor the first approver can also give the final approval.'
-      : 'Requests you have filed, and whether they were approved or rejected. Only Admin/Principal can decide a pending request, and it takes two of them.';
+      ? 'Deleting a student takes 3 steps — request, first confirmation, final confirmation (typed) — logged with who did each one. You can complete all 3 yourself, or have another Admin/Principal do a later step.'
+      : 'Requests you have filed, and whether they were approved or rejected. Only Admin/Principal can act on a pending request.';
     body.innerHTML = `<div class="empty-state"><b>Loading…</b></div>`;
     let rows = [];
     try{
       const res = await fetch('/api/deletion-requests');
       if(!res.ok) throw new Error('Request failed (' + res.status + ')');
       rows = await res.json();
+      _deletionRequestsCache = rows;
     }catch(e){
       body.innerHTML = `<div class="empty-state"><b>Could not load</b>${e.message}</div>`;
       return;
@@ -18288,11 +18295,9 @@
         : 'var(--muted, #667)';
       return `<span class="pill" style="color:${color};border-color:${color};">${st}</span>`;
     };
-    const myId = currentUser && currentUser.id;
-    const canDecide = r => isManagement
-      && (r.status === 'Pending' || r.status === 'Pending Final Approval')
-      && r.requestedBy !== myId
-      && !(r.status === 'Pending Final Approval' && r.firstApprovedBy === myId);
+    // Step 1 (request) and step 2 (first confirmation) can now be the same
+    // person, or a different one — see the comment above this function.
+    const canDecide = r => isManagement && (r.status === 'Pending' || r.status === 'Pending Final Approval');
     body.innerHTML = rows.map(r => `
       <div class="list-manage-row">
         <div style="font-size:0.82rem;">
@@ -18304,32 +18309,46 @@
         </div>
         ${canDecide(r) ? `
         <div style="display:flex; gap:10px;">
-          <button class="btn-danger-text" onclick="decideDeletionRequest('${r.id}','Approve','${r.status}')">${r.status === 'Pending' ? 'Give First Approval' : 'Give Final Approval &amp; Delete'}</button>
+          <button class="btn-danger-text" onclick="decideDeletionRequest('${r.id}','Approve','${r.status}')">${r.status === 'Pending' ? 'Confirm (Step 2 of 3)' : 'Final Confirm &amp; Delete (Step 3 of 3)'}</button>
           <button class="btn-edit-text" onclick="decideDeletionRequest('${r.id}','Reject','${r.status}')">Reject</button>
         </div>` : ''}
       </div>
     `).join('');
   }
   async function decideDeletionRequest(id, decision, stage){
-    const verb = decision === 'Approve'
-      ? (stage === 'Pending'
-        ? 'give the first approval on this deletion request (nothing is deleted yet — a second, different Admin/Principal must still approve it again)'
-        : 'give the final approval on this deletion request (the record will be soft-deleted immediately, recoverable from Recently Deleted)')
-      : 'reject this deletion request';
-    if(!await showConfirmDialog(`Are you sure you want to ${verb}?`)) return;
     let note = null;
+    let confirmText = null;
     if(decision === 'Reject'){
+      if(!await showConfirmDialog('Are you sure you want to reject this deletion request?')) return;
       note = prompt('Optional: note for the person who requested this (why it was rejected).') || '';
+    }else if(stage === 'Pending'){
+      // Step 2 of 3 — nothing is deleted yet, so a plain confirm is enough.
+      if(!await showConfirmDialog('Confirm step 2 of 3 for this deletion request? Nothing is deleted yet — one more, final confirmation step will still be needed.')) return;
+    }else{
+      // Step 3 of 3 — the actually-irreversible step. Since this can now be
+      // done by the same admin who did steps 1 and 2, the real safeguard
+      // here is typing the record's own Admission No back, the same
+      // pattern as Delete Permanently in Recently Deleted.
+      const row = (_deletionRequestsCache || []).find(r => r.id === id);
+      const m = row && row.recordLabel ? row.recordLabel.match(/Adm#\s*([^)]+)\)/) : null;
+      const expected = m ? m[1].trim() : '';
+      const typed = prompt(`This is the FINAL step — the record will be deleted immediately (recoverable only from Recently Deleted, for a limited time).\n\nType the Admission No (${expected || '—'}) to confirm.`);
+      if(typed === null) return;
+      if(typed.trim().toLowerCase() !== String(expected).trim().toLowerCase()){
+        showToast(`That didn't match — nothing was deleted.`);
+        return;
+      }
+      confirmText = typed.trim();
     }
     try{
       const res = await throwIfNotOk(await fetch('/api/deletion-requests?id=' + encodeURIComponent(id), {
-        method:'PUT', headers:{'Content-Type':'application/json', ...actorHeaders()}, body:JSON.stringify({ decision, note })
+        method:'PUT', headers:{'Content-Type':'application/json', ...actorHeaders()}, body:JSON.stringify({ decision, note, confirmText })
       }));
       const data = await res.json().catch(() => ({}));
       if(decision === 'Approve' && data.status === 'Pending Final Approval'){
-        showToast('First approval recorded — awaiting a second, different Admin/Principal to give the final approval.');
+        showToast('Step 2 of 3 confirmed — one final, typed confirmation step remains.');
       }else if(decision === 'Approve' && data.status === 'Approved'){
-        showToast('Final approval recorded — record removed (recoverable from Recently Deleted).');
+        showToast('Final step confirmed — record removed (recoverable from Recently Deleted).');
         await loadStudents(); renderDashboard(); renderAdmissionsBody();
       }else{
         showToast('Deletion request rejected.');
@@ -18383,11 +18402,11 @@
   async function deleteDuplicateEntry(id){
     const s = students.find(x => x.id === id);
     if(!s) return;
-    if(!await showConfirmDialog(`Send a deletion request for this duplicate record (${s.firstName} ${s.lastName}, ${s.admissionNo}) to an Admin/Principal for approval? Nothing is deleted yet.`)) return;
+    if(!await showConfirmDialog(`Start a 3-step deletion request for this duplicate record (${s.firstName} ${s.lastName}, ${s.admissionNo})? This is step 1 of 3 — nothing is deleted yet.`)) return;
     try{
       await throwIfNotOk(await fetch('/api/deletion-requests', { method:'POST', headers:{'Content-Type':'application/json', ...actorHeaders()}, body:JSON.stringify({ resource:'students', recordId:id, reason:'Duplicate record (flagged from Find Duplicate Students)' }) }));
       renderDuplicatesModal();
-      showToast('Deletion request sent — awaiting approval from another Admin/Principal.');
+      showToast('Step 1 of 3 recorded — open Pending Deletion Requests to continue.');
     }catch(e){
       if(e.message !== 'SESSION_EXPIRED') showToast('Could not send the deletion request (' + e.message + ').');
     }
@@ -18756,20 +18775,21 @@
 
   // Deletion is for genuine mistakes (duplicates, bad entries) — never how
   // a departing student is meant to be handled (use toggleStudentActive
-  // above for that). This never deletes anything itself: it files a
-  // request that a *different* Admin/Principal must review and approve —
-  // see handleDeletionRequests in server.js for the four-eyes check — and
-  // only that approval actually soft-deletes the record.
+  // above for that). This never deletes anything itself: it's step 1 of the
+  // 3-step deletion flow (request -> confirm -> final typed confirm) — see
+  // handleDeletionRequests in server.js. All 3 steps can be done by the
+  // same Admin/Principal, or split across a second one if the school has
+  // one; only the final, typed-confirmation step actually soft-deletes.
   async function requestDeleteStudent(id){
     const s = students.find(x => x.id === id);
     if(!s) return;
     const reason = prompt(`Why should ${s.firstName} ${s.lastName}'s record be deleted?\n\nIf this child has simply left the school, use "Mark Inactive" instead — that keeps their data for Transfer Certificates. Deletion is only for genuine mistakes, like a duplicate entry.`);
     if(reason === null) return;
     if(!reason.trim()){ showToast('A reason is required.'); return; }
-    if(!await showConfirmDialog(`Send this deletion request to an Admin/Principal for approval? Nothing is deleted yet — a different Admin or Principal must review and approve it first.`)) return;
+    if(!await showConfirmDialog(`Start a 3-step deletion request for this record? This is step 1 of 3 — nothing is deleted yet.`)) return;
     try{
       await throwIfNotOk(await fetch('/api/deletion-requests', { method:'POST', headers:{'Content-Type':'application/json', ...actorHeaders()}, body:JSON.stringify({ resource:'students', recordId:id, reason:reason.trim() }) }));
-      showToast('Deletion request sent — awaiting approval from another Admin/Principal.');
+      showToast('Step 1 of 3 recorded — open Pending Deletion Requests to continue.');
     }catch(e){
       if(e.message !== 'SESSION_EXPIRED') showToast('Could not send the deletion request (' + e.message + ').');
     }

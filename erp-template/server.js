@@ -1507,21 +1507,36 @@ async function purgeOneRecord(req, res, resource) {
   return res.status(200).json({ ok: true });
 }
 
-// ---------- Deletion requests (two-person approval for deleteViaApprovalOnly resources) ----------
-// A student record is never removed on one person's say-so, and never on
-// just ONE other person's say-so either: requesting, the first approval,
-// and the final approval must be three different people, and only
-// Admin/Principal may approve at either stage (see MANAGEMENT_ROLES below)
-// — Admin included, no exceptions. A request moves
-// Pending -> "Pending Final Approval" (after the first approval) ->
-// Approved (after a second, different Admin/Principal approves again) or
-// Rejected (at either stage). Approval performs the same reversible
-// soft-delete handleHybrid always did — nothing about *what* a deletion
-// does has changed, only how many people, and who, may set it off.
+// ---------- Deletion requests (3-step deletion for deleteViaApprovalOnly resources) ----------
+// A student record is never removed by a single click: it takes three
+// distinct, deliberate steps — request (with a reason), a first
+// confirmation, and a final confirmation that requires typing the record's
+// own identifier back — and only Admin/Principal may act at any stage (see
+// MANAGEMENT_ROLES below). Unlike the original design, the same single
+// Admin/Principal account may complete all three steps themselves in one
+// sitting — this was changed because requiring a second, different person
+// meant handing out Admin/Principal rights just to get past a deletion,
+// which is a bigger risk than the one-person-deletes-alone problem it was
+// solving. If a school DOES have a second trusted Admin/Principal, nothing
+// stops them from doing the 2nd/3rd step instead — the API doesn't care who
+// it is, only that they hold Admin/Principal. Every step is still logged
+// (requested_by/first_approved_by/decided_by, each with its own timestamp)
+// so there is a full audit trail either way. A request moves
+// Pending -> "Pending Final Approval" (after the first confirmation) ->
+// Approved (after the final, typed-confirmation step) or Rejected (at
+// either stage). Approval performs the same reversible soft-delete
+// handleHybrid always did — nothing about *what* a deletion does has
+// changed, only how many steps, and who, may carry it out.
 const DELETION_REQUEST_TARGETS = {
   students: {
     table: 'students',
     label: row => `${row.first_name || ''} ${row.last_name || ''}`.trim() + (row.admission_no ? ` (Adm# ${row.admission_no})` : ''),
+    // The final, irreversible step requires typing this value back — same
+    // "type the identifier to confirm" pattern as Delete Permanently in
+    // Recently Deleted (see PURGEABLE_RESOURCES above), since removing the
+    // different-person requirement means this typed check is now the main
+    // thing standing between one click and an actual deletion.
+    confirmField: 'admission_no', confirmLabel: 'Admission No',
   },
 };
 function shapeDeletionRequest(r) {
@@ -1569,7 +1584,7 @@ async function handleDeletionRequests(req, res) {
     }
     const { id } = req.query;
     if (!id) return res.status(400).json({ error: 'Missing id.' });
-    const { decision, note } = req.body || {};
+    const { decision, note, confirmText } = req.body || {};
     if (decision !== 'Approve' && decision !== 'Reject') return res.status(400).json({ error: 'decision must be "Approve" or "Reject".' });
     const rows = await sql`SELECT * FROM deletion_requests WHERE id = ${id}`;
     if (!rows.length) return res.status(404).json({ error: 'Request not found.' });
@@ -1577,19 +1592,11 @@ async function handleDeletionRequests(req, res) {
     if (reqRow.status === 'Approved' || reqRow.status === 'Rejected') {
       return res.status(409).json({ error: `This request was already ${reqRow.status.toLowerCase()}.` });
     }
-    // No single person may fill more than one of the three roles on the
-    // same request — this is what actually stops a unilateral deletion,
-    // Admin included:
-    //  1. the requester can never also approve their own request, at
-    //     either stage;
-    //  2. whoever gave the first approval can never also give the final,
-    //     second approval on that same request.
-    if (reqRow.requested_by === req.authUser.id) {
-      return res.status(403).json({ error: 'You requested this deletion — a different Admin or Principal must review it.' });
-    }
-    if (reqRow.status === 'Pending Final Approval' && reqRow.first_approved_by === req.authUser.id) {
-      return res.status(403).json({ error: 'You already gave the first approval on this request — a different Admin or Principal must give the final approval.' });
-    }
+    // Any step may be carried out by the same Admin/Principal who did the
+    // previous one, or by a different one — see the comment above
+    // DELETION_REQUEST_TARGETS for why the old different-person requirement
+    // was removed. What replaces it as the real safeguard on the final,
+    // irreversible step is the typed-confirmation check just below.
     if (decision === 'Reject') {
       await sql`
         UPDATE deletion_requests SET status = 'Rejected',
@@ -1601,8 +1608,9 @@ async function handleDeletionRequests(req, res) {
     }
     // decision === 'Approve'
     if (reqRow.status === 'Pending') {
-      // First approval only — nothing is deleted yet. A second, different
-      // Admin/Principal must approve again before this actually happens.
+      // First confirmation only — nothing is deleted yet. A final,
+      // typed-confirmation step (below) must still happen before this
+      // actually deletes anything — by the same admin or a different one.
       await sql`
         UPDATE deletion_requests SET status = 'Pending Final Approval',
           first_approved_by = ${req.authUser.id}, first_approved_by_name = ${req.authUser.name}, first_approved_at = now()
@@ -1610,10 +1618,21 @@ async function handleDeletionRequests(req, res) {
       `;
       return res.status(200).json({ ok: true, status: 'Pending Final Approval' });
     }
-    // reqRow.status === 'Pending Final Approval' — this is the second,
-    // final approval, so this is the only branch that actually deletes.
+    // reqRow.status === 'Pending Final Approval' — this is the third and
+    // final step, so this is the only branch that actually deletes. It
+    // requires typing the record's own identifier back first — the same
+    // "type to confirm" pattern as Delete Permanently — since this step no
+    // longer requires a second person to also sign off.
     const target = DELETION_REQUEST_TARGETS[reqRow.resource];
     if (target) {
+      const targetRows = await sql.query(`SELECT * FROM ${target.table} WHERE id = $1`, [reqRow.record_id]);
+      if (!targetRows.length) return res.status(404).json({ error: 'The record this request refers to no longer exists.' });
+      const targetRow = targetRows[0];
+      const expected = (targetRow[target.confirmField] || '').toString().trim().toLowerCase();
+      const given = (confirmText || '').toString().trim().toLowerCase();
+      if (!given || given !== expected) {
+        return res.status(400).json({ error: `Type the exact ${target.confirmLabel} to confirm final deletion — this cannot be undone from here (only from Recently Deleted).` });
+      }
       await sql.query(
         `UPDATE ${target.table} SET deleted_at = now(), deleted_by = $2, deleted_by_name = $3 WHERE id = $1`,
         [reqRow.record_id, req.authUser.id, req.authUser.name]
