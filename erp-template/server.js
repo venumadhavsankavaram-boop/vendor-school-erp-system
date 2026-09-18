@@ -128,6 +128,14 @@ async function ensureSchema() {
   // below). Null for rows soft-deleted before this column existed.
   await sql`ALTER TABLE users ADD COLUMN IF NOT EXISTS deleted_by TEXT`;
   await sql`ALTER TABLE users ADD COLUMN IF NOT EXISTS deleted_by_name TEXT`;
+  // A user's own "My Account" profile photo (base64 data URL, capped at 2MB
+  // client-side — see PHOTO_UPLOAD_MAX_BYTES in index.html, well under this
+  // server's 25mb JSON body limit). This column didn't exist before, so the
+  // photo was silently accepted by the PUT /api/users write and then
+  // silently dropped — SIMPLE_RESOURCES.users.fields didn't know about it
+  // either, so it was never even in the SQL column list — meaning it never
+  // persisted and vanished on the very next login/page load.
+  await sql`ALTER TABLE users ADD COLUMN IF NOT EXISTS photo TEXT`;
   await sql`CREATE TABLE IF NOT EXISTS payments (
     id TEXT PRIMARY KEY, receipt_no TEXT, student_id TEXT, student_name TEXT, category TEXT, mode TEXT,
     amount NUMERIC DEFAULT 0, discount NUMERIC DEFAULT 0, instalment TEXT, date TEXT, note TEXT,
@@ -824,6 +832,7 @@ const SIMPLE_RESOURCES = {
       { app: 'id', col: 'id' }, { app: 'name', col: 'name' }, { app: 'username', col: 'username' },
       { app: 'password', col: 'password' }, { app: 'role', col: 'role' },
       { app: 'linkedStudentId', col: 'linked_student_id' }, { app: 'recoveryCode', col: 'recovery_code' },
+      { app: 'photo', col: 'photo' },
     ],
   },
   payments: {
