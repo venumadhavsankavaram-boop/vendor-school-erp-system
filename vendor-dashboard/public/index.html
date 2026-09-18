@@ -508,6 +508,13 @@
         <div id="accessStatusBanner" style="border-radius:8px; padding:10px 12px; font-size:0.82rem; background:#fde8ee; color:#a80d5d; border:1px solid #f5c2d8;"></div>
         <div style="font-size:0.76rem; color:var(--ink-soft); margin-top:6px;">A manual cutoff for non-payment — this is never automatic. While suspended, only that school's own Admin can sign in to its ERP; Teachers, Staff, Parents and Students see a message to contact the school office. Nothing about the school's data is touched.</div>
       </div>
+      <div class="field" id="wipeZoneField" style="display:none;">
+        <label style="color:#a80d5d;">Danger Zone</label>
+        <div style="border:1px solid #f3c8c8; background:#fdf2f2; border-radius:8px; padding:12px 14px;">
+          <div style="font-size:0.82rem; color:#7a2020; margin-bottom:8px;">For a school that filled in demo/test data and wants a clean slate. Permanently deletes every student, staff member, attendance record, payment, exam result, certificate and message in <b>that school's own database</b> — right now, with no recycle bin. Logins and branding/settings are kept, and a full backup downloads automatically right before anything is deleted.</div>
+          <button type="button" class="btn" style="background:#c0264f; color:#fff;" id="btnOpenWipeModal">Reset School Data…</button>
+        </div>
+      </div>
       <div class="modal-error" id="schoolModalError"></div>
       <div class="modal-actions">
         <div style="display:flex; gap:8px; flex-wrap:wrap;">
@@ -521,6 +528,33 @@
         </div>
       </div>
     </form>
+  </div>
+</div>
+
+<!-- Reset School Data (hard wipe) confirmation -->
+<div class="modal-overlay" id="wipeModalOverlay">
+  <div class="modal" style="width:min(520px, 100%);">
+    <h3 style="color:#a80d5d;">Reset School Data</h3>
+    <div class="modal-sub" id="wipeModalSub"></div>
+    <div style="border:1px solid #f3c8c8; background:#fdf2f2; border-radius:8px; padding:12px 14px; font-size:0.82rem; color:#7a2020; margin:6px 0 14px;">
+      This cannot be undone from here. A backup JSON file of everything about to be deleted downloads to your computer automatically the moment you confirm — that download is the only copy that will exist afterward.
+    </div>
+    <div class="field">
+      <label for="wipeConfirmName">Type the school's exact name to confirm</label>
+      <input type="text" id="wipeConfirmName" autocomplete="off">
+    </div>
+    <div class="field">
+      <label for="wipeConfirmPassword">Re-enter your own password</label>
+      <input type="password" id="wipeConfirmPassword" autocomplete="current-password">
+    </div>
+    <div class="modal-error" id="wipeModalError"></div>
+    <div class="modal-actions">
+      <div></div>
+      <div class="right">
+        <button type="button" class="btn btn-light" id="btnCancelWipe">Cancel</button>
+        <button type="button" class="btn" style="background:#c0264f; color:#fff;" id="btnConfirmWipe">Permanently Wipe Data</button>
+      </div>
+    </div>
   </div>
 </div>
 
@@ -1699,6 +1733,7 @@ function openAddModal() {
   $('#apiKeyField').style.display = 'none';
   $('#envSnippetField').style.display = 'none';
   $('#btnDeleteSchool').style.display = 'none';
+  $('#wipeZoneField').style.display = 'none';
   renderAccessStatusUI(null);
   $('#schoolModalError').style.display = 'none';
   $('#schoolModalOverlay').classList.add('open');
@@ -1735,6 +1770,9 @@ function openEditModal(id) {
     $('#envSnippetField').style.display = 'none';
   }
   $('#btnDeleteSchool').style.display = 'inline-block';
+  // Reset Data needs somewhere to actually send the wipe request — no
+  // ERP URL on file means there's no live server to call.
+  $('#wipeZoneField').style.display = s.erpUrl ? 'block' : 'none';
   renderAccessStatusUI(s);
   $('#schoolModalError').style.display = 'none';
   $('#schoolModalOverlay').classList.add('open');
@@ -1746,6 +1784,71 @@ function closeSchoolModal() {
 
 $('#btnAddSchool').addEventListener('click', openAddModal);
 $('#btnCancelSchool').addEventListener('click', closeSchoolModal);
+
+/* ---------- Reset School Data (hard wipe) ---------- */
+function openWipeModal() {
+  if (!editingSchoolId) return;
+  const s = schoolsCache.find(x => x.id === editingSchoolId);
+  if (!s) return;
+  $('#wipeModalSub').textContent = `This is "${s.name}" — make sure that's the school you mean before typing its name below.`;
+  $('#wipeConfirmName').value = '';
+  $('#wipeConfirmPassword').value = '';
+  $('#wipeModalError').style.display = 'none';
+  $('#wipeModalOverlay').classList.add('open');
+}
+function closeWipeModal() {
+  $('#wipeModalOverlay').classList.remove('open');
+}
+$('#btnOpenWipeModal').addEventListener('click', () => { closeSchoolModal(); openWipeModal(); });
+$('#btnCancelWipe').addEventListener('click', () => { closeWipeModal(); openEditModal(editingSchoolId); });
+
+function downloadJSON(filename, data) {
+  const blob = new Blob([JSON.stringify(data, null, 2)], { type: 'application/json' });
+  const url = URL.createObjectURL(blob);
+  const a = document.createElement('a');
+  a.href = url;
+  a.download = filename;
+  document.body.appendChild(a);
+  a.click();
+  document.body.removeChild(a);
+  setTimeout(() => URL.revokeObjectURL(url), 1000);
+}
+
+$('#btnConfirmWipe').addEventListener('click', async () => {
+  if (!editingSchoolId) return;
+  const s = schoolsCache.find(x => x.id === editingSchoolId);
+  if (!s) return;
+  const errEl = $('#wipeModalError');
+  errEl.style.display = 'none';
+  const confirmName = $('#wipeConfirmName').value;
+  const password = $('#wipeConfirmPassword').value;
+  if (!confirmName.trim() || !password) {
+    errEl.textContent = "Type the school's name and your password to confirm.";
+    errEl.style.display = 'block';
+    return;
+  }
+  if (!confirm(`Last check: this permanently deletes all student, staff, attendance, fee, exam and certificate data for "${s.name}". This cannot be undone from here. Continue?`)) return;
+  const btn = $('#btnConfirmWipe');
+  btn.disabled = true;
+  btn.textContent = 'Wiping…';
+  try {
+    const res = await api('/api/schools/' + editingSchoolId + '/wipe-data', {
+      method: 'POST',
+      body: { confirmSchoolName: confirmName, vendorPassword: password },
+    });
+    downloadJSON(`${s.name.replace(/[^a-z0-9]+/gi, '-')}-backup-${(res.wipedAt || new Date().toISOString()).slice(0, 10)}.json`, res.backup);
+    const total = Object.values(res.counts || {}).reduce((a, b) => a + b, 0);
+    showToast(`Wiped ${total} records from "${s.name}" — backup downloaded.`);
+    closeWipeModal();
+    await loadAll();
+  } catch (err) {
+    errEl.textContent = err.message;
+    errEl.style.display = 'block';
+  } finally {
+    btn.disabled = false;
+    btn.textContent = 'Permanently Wipe Data';
+  }
+});
 
 $('#schoolForm').addEventListener('submit', async (e) => {
   e.preventDefault();

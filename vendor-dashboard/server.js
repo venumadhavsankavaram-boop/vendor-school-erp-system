@@ -308,6 +308,23 @@ async function ensureSchema() {
     )
   `;
   await sql`CREATE INDEX IF NOT EXISTS idx_vendor_deploy_actions_school_id ON vendor_deploy_actions (school_id, created_at DESC)`;
+  // Every "Reset School Data" hard wipe — see POST /api/schools/:id/wipe-data
+  // below. This dashboard never stores the wiped data itself (only that
+  // school's own ERP has it, and only until the moment it's deleted), so
+  // this table is the one durable record that a wipe happened, when, by
+  // which of your logins, and how many rows of each kind it removed —
+  // deliberately no PII, just counts.
+  await sql`
+    CREATE TABLE IF NOT EXISTS vendor_wipe_actions (
+      id TEXT PRIMARY KEY,
+      school_id TEXT NOT NULL REFERENCES schools(id) ON DELETE CASCADE,
+      admin_id TEXT,
+      admin_name TEXT,
+      counts JSONB NOT NULL DEFAULT '{}'::jsonb,
+      created_at TIMESTAMPTZ NOT NULL DEFAULT now()
+    )
+  `;
+  await sql`CREATE INDEX IF NOT EXISTS idx_vendor_wipe_actions_school_id ON vendor_wipe_actions (school_id, created_at DESC)`;
   // SVM EdTech's own running costs (hosting, domains, tools, etc.) — kept
   // here so the Accounting tab can show a real net cash position, not just
   // what schools owe you.
@@ -1575,6 +1592,90 @@ app.post('/api/schools/:id/support-login', async (req, res) => {
     return res.status(200).json({ url, expiresAt: new Date(payload.exp).toISOString() });
   } catch (err) {
     console.error('support login error:', err);
+    return res.status(500).json({ error: 'Something went wrong on the server.' });
+  }
+});
+
+// ---------- Reset School Data (hard wipe) ----------
+// The most destructive button in this whole dashboard — for a school that
+// filled in demo/test data during onboarding and wants a clean slate, not
+// for anything else. It deletes every student, staff member, attendance
+// record, payment, exam result, certificate, message, and similar row in
+// that school's own database, permanently — see the long comment on
+// POST /api/vendor/wipe-data in that school's own server.js for exactly
+// what is and isn't touched (short version: logins and branding survive).
+//
+// Two things stand between a click and an actual wipe, on top of the
+// browser-side confirmation modal: re-entering YOUR OWN password (proves
+// it's really you at the keyboard, not a stray click or someone who found
+// your unlocked laptop) and typing the school's name back exactly (proves
+// you have the right school selected — there is no "undo school" once
+// this runs). The school's ERP independently re-checks its own name too,
+// so a mismatch here can never be the only thing standing in the way.
+//
+// The wiped school's own server takes a full backup of every row right
+// before deleting it and hands that back in the response — this route
+// relays it straight through unmodified so the browser can offer it as an
+// immediate download; this dashboard does not keep a copy of it anywhere.
+app.post('/api/schools/:id/wipe-data', async (req, res) => {
+  if (!req.authAdmin) return res.status(401).json({ error: 'Not logged in.' });
+  try {
+    const { vendorPassword, confirmSchoolName } = req.body || {};
+    if (!vendorPassword) return res.status(400).json({ error: 'Re-enter your password to confirm.' });
+    if (!confirmSchoolName || !String(confirmSchoolName).trim()) return res.status(400).json({ error: "Type the school's exact name to confirm." });
+    const adminRows = await sql`SELECT * FROM vendor_admins WHERE id = ${req.authAdmin.id}`;
+    if (!adminRows.length) return res.status(401).json({ error: 'Not logged in.' });
+    const admin = adminRows[0];
+    const passwordOk = await bcrypt.compare(String(vendorPassword), admin.password || '');
+    if (!passwordOk) return res.status(401).json({ error: 'Incorrect password — nothing was wiped.' });
+    const rows = await sql`SELECT * FROM schools WHERE id = ${req.params.id}`;
+    if (!rows.length) return res.status(404).json({ error: 'School not found.' });
+    const school = rows[0];
+    if (String(confirmSchoolName).trim() !== String(school.name).trim()) {
+      return res.status(400).json({ error: "That doesn't match this school's name exactly — nothing was wiped." });
+    }
+    if (!school.erp_url) return res.status(400).json({ error: 'This school has no ERP URL on file yet — add one from Edit School first.' });
+    const base = String(school.erp_url).replace(/\/+$/, '');
+    const controller = new AbortController();
+    const timeout = setTimeout(() => controller.abort(), 25000);
+    let upstream, text;
+    try {
+      upstream = await fetch(base + '/api/vendor/wipe-data', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json', 'X-Vendor-Api-Key': school.api_key },
+        body: JSON.stringify({ confirmSchoolName: school.name, vendorAdminName: req.authAdmin.name }),
+        signal: controller.signal,
+      });
+      text = await upstream.text();
+    } finally {
+      clearTimeout(timeout);
+    }
+    let data;
+    try { data = text ? JSON.parse(text) : null; } catch { data = null; }
+    if (!upstream.ok || !data || !data.ok) {
+      return res.status(502).json({ error: (data && data.error) || "That school's ERP rejected the wipe request." });
+    }
+    const auditId = 'wipe_' + crypto.randomBytes(8).toString('hex');
+    await sql`
+      INSERT INTO vendor_wipe_actions (id, school_id, admin_id, admin_name, counts)
+      VALUES (${auditId}, ${school.id}, ${req.authAdmin.id}, ${req.authAdmin.name}, ${JSON.stringify(data.counts || {})}::jsonb)
+    `;
+    return res.status(200).json({ ok: true, wipedAt: data.wipedAt, counts: data.counts, backup: data.backup });
+  } catch (err) {
+    console.error('wipe data error:', err);
+    if (err.name === 'AbortError') return res.status(504).json({ error: "That school's ERP took too long to respond — check there directly before trying again." });
+    return res.status(500).json({ error: 'Something went wrong on the server.' });
+  }
+});
+
+app.get('/api/schools/:id/wipe-actions', async (req, res) => {
+  try {
+    const rows = await sql`SELECT * FROM vendor_wipe_actions WHERE school_id = ${req.params.id} ORDER BY created_at DESC LIMIT 50`;
+    return res.status(200).json(rows.map(r => ({
+      id: r.id, adminName: r.admin_name, counts: r.counts, createdAt: r.created_at,
+    })));
+  } catch (err) {
+    console.error('list wipe actions error:', err);
     return res.status(500).json({ error: 'Something went wrong on the server.' });
   }
 });

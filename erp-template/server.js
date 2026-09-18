@@ -235,6 +235,17 @@ async function ensureSchema() {
     purged_by TEXT, purged_by_name TEXT, purged_at TIMESTAMPTZ NOT NULL DEFAULT now()
   )`;
   await sql`CREATE INDEX IF NOT EXISTS idx_purge_log_resource ON purge_log (resource, record_id)`;
+  // One row per "Reset School Data" hard wipe (see WIPE_TABLES / the
+  // /api/vendor/wipe-data route far below) — this table is itself never
+  // wiped, so the fact that a wipe happened, when, by whom, and how many
+  // rows of each kind it removed survives forever, even though the wiped
+  // data itself doesn't. Deliberately stores only counts, never the
+  // records themselves (those exist only in the one-time backup handed
+  // back to the vendor dashboard at wipe time).
+  await sql`CREATE TABLE IF NOT EXISTS wipe_log (
+    id TEXT PRIMARY KEY, wiped_at TIMESTAMPTZ NOT NULL DEFAULT now(),
+    vendor_admin_name TEXT, counts JSONB NOT NULL DEFAULT '{}'::jsonb
+  )`;
   await sql`CREATE TABLE IF NOT EXISTS staff (
     id TEXT PRIMARY KEY, first_name TEXT, last_name TEXT, department TEXT, designation TEXT, status TEXT,
     staff_id TEXT, extra JSONB NOT NULL DEFAULT '{}'::jsonb, created_at TIMESTAMPTZ NOT NULL DEFAULT now()
@@ -2654,6 +2665,104 @@ app.get('/api/vendor/admission-inquiries', async (req, res) => {
   } catch (err) {
     console.error('vendor admission-inquiries error:', err);
     return res.status(500).json({ error: 'Something went wrong on the server.' });
+  }
+});
+
+// ---------- Hard wipe ("Reset School Data") ----------
+// A school that filled in demo/test data during onboarding and wants a
+// clean slate for real data entry — this is NOT the recycle-bin/purge
+// system above (that's for one record at a time, with a 60-day undo
+// window). This deletes every row of every table below, immediately,
+// with no recovery on this server afterward — the one-time JSON backup
+// this route hands back to the caller is the only copy that survives.
+//
+// What is deliberately NOT touched, so a school never has to redo
+// onboarding just because someone fat-fingered a few test students:
+// user accounts/logins (users), branding/settings (school_info,
+// attendance_settings, custom_roles, kv_store), the website's own photo
+// gallery (website_gallery), structural setup (subjects, exam_defs,
+// fee_structure, rooms, exam_room_config), running document/receipt/
+// certificate serial counters (doc_counters — left alone so a number is
+// never reused even across a wipe), the school's holiday calendar, push
+// notification subscriptions, active login sessions, and both audit
+// trails (audit_log, wipe_log — this row of which is written by this
+// very request, right after the wipe below).
+//
+// Only the vendor dashboard can call this — never a school's own Admin,
+// and there's no UI anywhere in this app that reaches it. Authenticated
+// the same way /api/vendor/admission-inquiries above is (the school's own
+// VENDOR_API_KEY, sent as a plain header for this direct server-to-server
+// call), PLUS this route independently re-checks the school's own name
+// against confirmSchoolName even though the dashboard already made the
+// vendor type it and re-enter their password before ever sending this
+// request — defense in depth for the most destructive thing this server
+// can do.
+const WIPE_TABLES = [
+  'exam_hall_tickets', 'exam_results', 'attendance_records', 'staff_attendance_records',
+  'biometric_punches', 'payments', 'student_discounts', 'student_extra_fees',
+  'certificates_issued', 'purge_log', 'deletion_requests', 'comms_messages',
+  'acct_income', 'acct_expenses', 'student_concerns', 'student_submissions',
+  'notification_events', 'admission_inquiries', 'staff_payroll', 'staff', 'students',
+];
+app.post('/api/vendor/wipe-data', async (req, res) => {
+  try {
+    const key = req.headers['x-vendor-api-key'];
+    if (!process.env.VENDOR_API_KEY || !key || key !== process.env.VENDOR_API_KEY) {
+      return res.status(401).json({ error: 'Invalid or missing vendor API key.' });
+    }
+    const { confirmSchoolName, vendorAdminName } = req.body || {};
+    const infoRows = await sql`SELECT data FROM school_info WHERE id = 1`;
+    const actualName = (infoRows[0] && infoRows[0].data && infoRows[0].data.name) || '';
+    if (!confirmSchoolName || String(confirmSchoolName).trim().toLowerCase() !== String(actualName).trim().toLowerCase()) {
+      return res.status(400).json({ error: "The school name didn't match what this server has on file — nothing was wiped." });
+    }
+    // Read everything first — this IS the backup. Built before a single
+    // DELETE runs, so even if the transaction below fails partway (it
+    // shouldn't — see the comment on sql.transaction), nothing is lost
+    // that wasn't already captured here.
+    const backup = { schoolName: actualName, wipedAt: new Date().toISOString(), tables: {} };
+    for (const table of WIPE_TABLES) {
+      backup.tables[table] = await sql.query(`SELECT * FROM ${table}`);
+    }
+    const counts = Object.fromEntries(WIPE_TABLES.map(t => [t, backup.tables[t].length]));
+    // sql.transaction runs every statement in one database transaction —
+    // if any single DELETE fails, ALL of them roll back, so this can only
+    // ever end in "nothing changed" or "everything on the list is gone",
+    // never a half-wiped school. The literal table names below must stay
+    // in sync with WIPE_TABLES above (a tagged template can't take a
+    // dynamic identifier the way sql.query above does).
+    await sql.transaction([
+      sql`DELETE FROM exam_hall_tickets`,
+      sql`DELETE FROM exam_results`,
+      sql`DELETE FROM attendance_records`,
+      sql`DELETE FROM staff_attendance_records`,
+      sql`DELETE FROM biometric_punches`,
+      sql`DELETE FROM payments`,
+      sql`DELETE FROM student_discounts`,
+      sql`DELETE FROM student_extra_fees`,
+      sql`DELETE FROM certificates_issued`,
+      sql`DELETE FROM purge_log`,
+      sql`DELETE FROM deletion_requests`,
+      sql`DELETE FROM comms_messages`,
+      sql`DELETE FROM acct_income`,
+      sql`DELETE FROM acct_expenses`,
+      sql`DELETE FROM student_concerns`,
+      sql`DELETE FROM student_submissions`,
+      sql`DELETE FROM notification_events`,
+      sql`DELETE FROM admission_inquiries`,
+      sql`DELETE FROM staff_payroll`,
+      sql`DELETE FROM staff`,
+      sql`DELETE FROM students`,
+    ]);
+    const wipeId = 'wipe_' + crypto.randomBytes(8).toString('hex');
+    await sql`
+      INSERT INTO wipe_log (id, vendor_admin_name, counts)
+      VALUES (${wipeId}, ${vendorAdminName ? String(vendorAdminName).trim().slice(0, 200) : null}, ${JSON.stringify(counts)}::jsonb)
+    `;
+    return res.status(200).json({ ok: true, wipeId, wipedAt: backup.wipedAt, counts, backup });
+  } catch (err) {
+    console.error('vendor wipe-data error:', err);
+    return res.status(500).json({ error: 'Something went wrong on the server — nothing was wiped (the transaction only commits if every step succeeds).' });
   }
 });
 
