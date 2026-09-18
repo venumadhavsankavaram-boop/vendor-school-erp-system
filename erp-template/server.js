@@ -672,6 +672,13 @@ const PUBLIC_API_ROUTES = [
   { path: '/api/logout', methods: ['POST'] },
   { path: '/api/vendor-support-login', methods: ['GET'] },
   { path: '/api/vendor/admission-inquiries', methods: ['GET'] },
+  // Same reasoning as /api/vendor/admission-inquiries just above — this is
+  // the vendor dashboard's server-to-server hard-wipe call (see the route
+  // itself far below), authenticated purely by its own VENDOR_API_KEY
+  // header check, never by a logged-in school Admin's session. Missing
+  // from this list, every call to it was rejected right here with "Not
+  // logged in." before the route ever got a chance to check that header.
+  { path: '/api/vendor/wipe-data', methods: ['POST'] },
   { path: '/api/admission-inquiries', methods: ['POST'] },
   { path: '/api/comms-messages', methods: ['GET'] },
   { path: '/api/website-gallery', methods: ['GET'] },
