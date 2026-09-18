@@ -18129,6 +18129,17 @@
   // This modal is the one place both resources' "Recently Deleted" list
   // and Restore action live, since the two are otherwise identical.
   let _trashResource = '';
+  let _trashRowsCache = [];
+  // Days until an auto-purge, formatted the way the rest of the app phrases
+  // relative dates — mirrors TRASH_RETENTION_DAYS in server.js (keep the two
+  // in sync if that ever changes).
+  function purgeCountdownText(purgesAt){
+    if(!purgesAt) return '';
+    const days = Math.ceil((new Date(purgesAt) - new Date()) / 86400000);
+    if(days <= 0) return 'auto-purges very soon';
+    if(days === 1) return 'auto-purges tomorrow';
+    return `auto-purges in ${days} days`;
+  }
   const TRASH_CONFIG = {
     students: {
       apiPath: '/api/students',
@@ -18136,6 +18147,10 @@
       label: s => `${s.firstName||''} ${s.lastName||''}`.trim() || '(no name)',
       meta: s => `${s.className||'—'} — Section ${s.section||'—'} · Admission No: ${s.admissionNo||'—'}`,
       onRestored: async () => { await loadStudents(); renderDashboard(); renderAdmissionsBody(); },
+      // "Delete Permanently" requires typing this back exactly, so an admin
+      // can't fat-finger the wrong row in a long list — same idea as typing
+      // a repo's name to confirm deleting it.
+      confirmLabel: 'Admission No', confirmValue: s => s.admissionNo || '',
     },
     users: {
       apiPath: '/api/users',
@@ -18143,6 +18158,7 @@
       label: u => u.name || u.username || '(no name)',
       meta: u => `${u.username||'—'} · ${u.role||'—'}`,
       onRestored: async () => { await loadUsers(); refreshUserListViews(); },
+      confirmLabel: 'Username', confirmValue: u => u.username || '',
     },
   };
   async function openTrashModal(resource){
@@ -18165,6 +18181,7 @@
       const res = await fetch(cfg.apiPath + '?trash=1');
       if(!res.ok) throw new Error('Request failed (' + res.status + ')');
       rows = await res.json();
+      _trashRowsCache = rows;
     }catch(e){
       body.innerHTML = `<div class="empty-state"><b>Could not load</b>${e.message}</div>`;
       return;
@@ -18178,9 +18195,14 @@
         <div style="font-size:0.82rem;">
           <div class="lm-name">${cfg.label(r)}</div>
           <div class="lm-meta">${cfg.meta(r)}</div>
+          <div class="lm-meta" style="color:var(--muted,#667);">
+            Deleted${r.deletedByName ? ' by ' + r.deletedByName : ''}${r.deletedAt ? ' · ' + new Date(r.deletedAt).toLocaleDateString('en-IN', {day:'2-digit',month:'short',year:'numeric'}) : ''}
+            ${r.purgesAt ? ' · ' + purgeCountdownText(r.purgesAt) : ''}
+          </div>
         </div>
         <div style="display:flex; gap:10px;">
           <button class="btn btn-primary btn-sm" onclick="restoreTrashedRecord('${r.id}')">Restore</button>
+          <button class="btn-danger-text" onclick="purgeTrashedRecord('${r.id}')">Delete Permanently</button>
         </div>
       </div>
     `).join('');
@@ -18194,6 +18216,33 @@
       await renderTrashModal();
     }catch(e){
       showToast('Could not restore (' + e.message + ').');
+    }
+  }
+  // Jumps the retention queue and removes one record right now instead of
+  // waiting out the auto-purge window (see TRASH_RETENTION_DAYS in
+  // server.js). This is the one truly irreversible action in the whole
+  // deletion flow, so — unlike the soft-delete itself — it asks the admin
+  // to type the record's own identifier back, the same pattern GitHub uses
+  // for deleting a repo, rather than just a yes/no click.
+  async function purgeTrashedRecord(id){
+    const cfg = TRASH_CONFIG[_trashResource];
+    const rows = _trashRowsCache || [];
+    const row = rows.find(r => r.id === id);
+    const expected = row ? cfg.confirmValue(row) : '';
+    const typed = prompt(`This permanently and irreversibly deletes this record — there is no Restore after this.\n\nType the ${cfg.confirmLabel} (${expected || '—'}) to confirm.`);
+    if(typed === null) return;
+    if(typed.trim().toLowerCase() !== String(expected).trim().toLowerCase()){
+      showToast(`That didn't match — nothing was deleted.`);
+      return;
+    }
+    try{
+      await throwIfNotOk(await fetch(cfg.apiPath + '?id=' + encodeURIComponent(id) + '&purge=1', {
+        method:'PUT', headers:{'Content-Type':'application/json', ...actorHeaders()}, body: JSON.stringify({ confirmText: typed.trim() })
+      }));
+      showToast('Permanently deleted.');
+      await renderTrashModal();
+    }catch(e){
+      showToast('Could not permanently delete (' + e.message + ').');
     }
   }
 

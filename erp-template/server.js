@@ -122,6 +122,12 @@ async function ensureSchema() {
   // for the restore path, the self-delete/last-admin guards, and the
   // immediate session wipe that now comes with every delete.
   await sql`ALTER TABLE users ADD COLUMN IF NOT EXISTS deleted_at TIMESTAMPTZ`;
+  // Who actually pulled the trigger on the soft delete, for the audit trail
+  // shown in Recently Deleted and carried into purge_log if it's ever
+  // permanently removed (see purgeExpiredTrash / the PUT ?purge=1 branch
+  // below). Null for rows soft-deleted before this column existed.
+  await sql`ALTER TABLE users ADD COLUMN IF NOT EXISTS deleted_by TEXT`;
+  await sql`ALTER TABLE users ADD COLUMN IF NOT EXISTS deleted_by_name TEXT`;
   await sql`CREATE TABLE IF NOT EXISTS payments (
     id TEXT PRIMARY KEY, receipt_no TEXT, student_id TEXT, student_name TEXT, category TEXT, mode TEXT,
     amount NUMERIC DEFAULT 0, discount NUMERIC DEFAULT 0, instalment TEXT, date TEXT, note TEXT,
@@ -175,6 +181,12 @@ async function ensureSchema() {
   // Same soft-delete treatment as users — see the ALTER TABLE users comment
   // above and HYBRID_RESOURCES.students' softDelete flag below.
   await sql`ALTER TABLE students ADD COLUMN IF NOT EXISTS deleted_at TIMESTAMPTZ`;
+  // Same audit-trail columns as users above — recorded by
+  // handleDeletionRequests' final-approval branch (the only place
+  // deleted_at is ever set on a student), so Recently Deleted can show who
+  // actually gave that final approval, and purge_log can carry it forward.
+  await sql`ALTER TABLE students ADD COLUMN IF NOT EXISTS deleted_by TEXT`;
+  await sql`ALTER TABLE students ADD COLUMN IF NOT EXISTS deleted_by_name TEXT`;
   // A student record is never deleted on a single click — see
   // HYBRID_RESOURCES.students' deleteViaApprovalOnly flag and
   // handleDeletionRequests below. Getting from "requested" to "actually
@@ -205,6 +217,24 @@ async function ensureSchema() {
     issued_by TEXT, issued_by_name TEXT, issued_at TIMESTAMPTZ NOT NULL DEFAULT now()
   )`;
   await sql`CREATE INDEX IF NOT EXISTS idx_certificates_issued_record ON certificates_issued (resource, record_id)`;
+  // Recycle-bin retention: a soft-deleted row (students/users — see
+  // PURGEABLE_RESOURCES below) doesn't sit in Recently Deleted forever.
+  // purgeExpiredTrash() removes it for good once it's older than
+  // TRASH_RETENTION_DAYS, and an Admin/Principal can also remove it sooner
+  // by hand from Recently Deleted ("Delete Permanently"). Either way, since
+  // the row itself is about to be gone for good, this is the only lasting
+  // record that it ever existed and was deleted — who deleted it, who (if
+  // anyone) purged it early, and when. Mirrors how Salesforce's Recycle
+  // Bin / Google Workspace's deleted-user retention / GitHub's deleted-repo
+  // window all work: soft-delete now, hard-delete later on a timer, with a
+  // paper trail either way.
+  await sql`CREATE TABLE IF NOT EXISTS purge_log (
+    id TEXT PRIMARY KEY, resource TEXT NOT NULL, record_id TEXT NOT NULL, record_label TEXT,
+    deleted_at TIMESTAMPTZ, deleted_by_name TEXT,
+    purge_reason TEXT NOT NULL DEFAULT 'manual',
+    purged_by TEXT, purged_by_name TEXT, purged_at TIMESTAMPTZ NOT NULL DEFAULT now()
+  )`;
+  await sql`CREATE INDEX IF NOT EXISTS idx_purge_log_resource ON purge_log (resource, record_id)`;
   await sql`CREATE TABLE IF NOT EXISTS staff (
     id TEXT PRIMARY KEY, first_name TEXT, last_name TEXT, department TEXT, designation TEXT, status TEXT,
     staff_id TEXT, extra JSONB NOT NULL DEFAULT '{}'::jsonb, created_at TIMESTAMPTZ NOT NULL DEFAULT now()
@@ -445,6 +475,12 @@ async function ensureSchema() {
   await sql`CREATE INDEX IF NOT EXISTS idx_student_submissions_recipient_type ON student_submissions (recipient_type)`;
 }
 await ensureSchema();
+// Sweep once at boot (covers rows that aged past TRASH_RETENTION_DAYS while
+// the server was down or never had anyone open Recently Deleted) and then
+// once a day thereafter — see purgeExpiredTrash's own comment above for why
+// this runs on both a timer and on-demand.
+purgeExpiredTrash().catch(err => console.error('purgeExpiredTrash (startup) failed:', err));
+setInterval(() => { purgeExpiredTrash().catch(err => console.error('purgeExpiredTrash (interval) failed:', err)); }, 24 * 60 * 60 * 1000);
 
 // ---------- One-time accounting migration: kv_store blobs -> real tables ----------
 // Runs once per table (skips if acct_income / acct_expenses already has rows,
@@ -1204,12 +1240,20 @@ async function handleUsers(req, res) {
     if (trashMode && (!req.authUser || req.authUser.role !== 'Admin')) {
       return res.status(403).json({ error: 'Admin access required.' });
     }
+    if (trashMode) await purgeExpiredTrash();
     const rows = await sql.query(
       `SELECT * FROM ${table} WHERE deleted_at IS ${trashMode ? 'NOT NULL' : 'NULL'} ORDER BY created_at ASC NULLS LAST`
     );
     return res.status(200).json(rows.map(r => {
       const shaped = simpleToAppShape(r, fields);
       delete shaped.password;
+      // Recently Deleted needs to show when this was deleted and when it
+      // will auto-purge — see TRASH_RETENTION_DAYS/purgeExpiredTrash above.
+      if (trashMode) {
+        shaped.deletedAt = r.deleted_at;
+        shaped.deletedByName = r.deleted_by_name;
+        shaped.purgesAt = r.deleted_at ? new Date(new Date(r.deleted_at).getTime() + TRASH_RETENTION_DAYS * 86400000).toISOString() : null;
+      }
       return shaped;
     }));
   }
@@ -1222,8 +1266,15 @@ async function handleUsers(req, res) {
       }
       const { id } = req.query;
       if (!id) return res.status(400).json({ error: 'Missing id.' });
-      await sql`UPDATE users SET deleted_at = NULL WHERE id = ${id}`;
+      await sql`UPDATE users SET deleted_at = NULL, deleted_by = NULL, deleted_by_name = NULL WHERE id = ${id}`;
       return res.status(200).json({ ok: true });
+    }
+    // "Delete Permanently" from Recently Deleted — see purgeOneRecord above.
+    if (req.method === 'PUT' && req.query.purge === '1') {
+      if (!req.authUser || req.authUser.role !== 'Admin') {
+        return res.status(403).json({ error: 'Admin access required.' });
+      }
+      return await purgeOneRecord(req, res, 'users');
     }
     const body = { ...(req.body || {}) };
     if (!body.id) return res.status(400).json({ error: 'Missing id.' });
@@ -1270,7 +1321,7 @@ async function handleUsers(req, res) {
         return res.status(400).json({ error: "You can't delete the last remaining Admin account — create another Admin first." });
       }
     }
-    await sql`UPDATE users SET deleted_at = now() WHERE id = ${id}`;
+    await sql`UPDATE users SET deleted_at = now(), deleted_by = ${req.authUser ? req.authUser.id : null}, deleted_by_name = ${req.authUser ? req.authUser.name : null} WHERE id = ${id}`;
     // Whatever session(s) this account is signed in on, elsewhere or right
     // now, stop working on their very next request instead of coasting on
     // a stale cookie until it naturally times out.
@@ -1305,9 +1356,20 @@ async function handleHybrid(req, res, config) {
     if (trashMode && (!req.authUser || !MANAGEMENT_ROLES.includes(req.authUser.role))) {
       return res.status(403).json({ error: 'Admin or Principal access required to view deleted records.' });
     }
+    if (trashMode) await purgeExpiredTrash();
     const whereClause = softDelete ? `WHERE deleted_at IS ${trashMode ? 'NOT NULL' : 'NULL'}` : '';
     const rows = await sql.query(`SELECT * FROM ${table} ${whereClause} ORDER BY created_at ASC NULLS LAST`);
-    return res.status(200).json(rows.map(r => hybridToAppShape(r, core)));
+    return res.status(200).json(rows.map(r => {
+      const shaped = hybridToAppShape(r, core);
+      // Recently Deleted needs to show when this was deleted and when it
+      // will auto-purge — see TRASH_RETENTION_DAYS/purgeExpiredTrash above.
+      if (trashMode) {
+        shaped.deletedAt = r.deleted_at;
+        shaped.deletedByName = r.deleted_by_name;
+        shaped.purgesAt = r.deleted_at ? new Date(new Date(r.deleted_at).getTime() + TRASH_RETENTION_DAYS * 86400000).toISOString() : null;
+      }
+      return shaped;
+    }));
   }
   if (req.method === 'POST' || req.method === 'PUT') {
     // A restore is a bodyless PUT carrying ?restore=1 — mirrors handleUsers.
@@ -1317,8 +1379,16 @@ async function handleHybrid(req, res, config) {
       }
       const { id } = req.query;
       if (!id) return res.status(400).json({ error: 'Missing id.' });
-      await sql.query(`UPDATE ${table} SET deleted_at = NULL WHERE id = $1`, [id]);
+      await sql.query(`UPDATE ${table} SET deleted_at = NULL, deleted_by = NULL, deleted_by_name = NULL WHERE id = $1`, [id]);
       return res.status(200).json({ ok: true });
+    }
+    // "Delete Permanently" from Recently Deleted — see purgeOneRecord above.
+    // table doubles as the PURGEABLE_RESOURCES key (both are 'students').
+    if (softDelete && req.method === 'PUT' && req.query.purge === '1') {
+      if (!req.authUser || !MANAGEMENT_ROLES.includes(req.authUser.role)) {
+        return res.status(403).json({ error: 'Admin or Principal access required to permanently delete a record.' });
+      }
+      return await purgeOneRecord(req, res, table);
     }
     const body = req.body || {};
     if (!body.id) return res.status(400).json({ error: 'Missing id.' });
@@ -1363,6 +1433,78 @@ async function handleHybrid(req, res, config) {
     return res.status(200).json({ ok: true });
   }
   return res.status(405).json({ error: 'Method not allowed.' });
+}
+
+// ---------- Recycle bin retention & permanent purge ----------
+// A soft-deleted row (students, users) sits in Recently Deleted so a
+// mistake can be undone, but it doesn't sit there forever — every major
+// system with a recycle bin (Salesforce, Google Workspace, Microsoft 365,
+// GitHub) purges it for good after a fixed window. TRASH_RETENTION_DAYS is
+// that window; purgeExpiredTrash() is the sweep that enforces it, called
+// opportunistically whenever Recently Deleted is opened (see the ?trash=1
+// branches in handleUsers/handleHybrid) and on a standing timer (see
+// setInterval near the bottom of this file) so it still runs even if no
+// one opens that screen for a while. An Admin/Principal can also jump the
+// queue and purge a specific record immediately — see the PUT ?purge=1
+// branches below — but either way, once a row is actually gone, purge_log
+// is the only remaining trace that it ever existed and was removed.
+const TRASH_RETENTION_DAYS = 60;
+const PURGEABLE_RESOURCES = {
+  students: {
+    table: 'students',
+    label: row => `${row.first_name || ''} ${row.last_name || ''}`.trim() + (row.admission_no ? ` (Adm# ${row.admission_no})` : ''),
+    // What an admin must type into the "Delete Permanently" confirmation
+    // to prove they mean this specific record, not just any record.
+    confirmField: 'admission_no', confirmLabel: 'Admission No',
+  },
+  users: {
+    table: 'users',
+    label: row => row.name || row.username || row.id,
+    confirmField: 'username', confirmLabel: 'Username',
+  },
+};
+async function purgeExpiredTrash() {
+  for (const [resource, cfg] of Object.entries(PURGEABLE_RESOURCES)) {
+    const expired = await sql.query(
+      `SELECT * FROM ${cfg.table} WHERE deleted_at IS NOT NULL AND deleted_at < now() - ($1 * interval '1 day')`,
+      [TRASH_RETENTION_DAYS]
+    );
+    for (const row of expired) {
+      await sql`
+        INSERT INTO purge_log (id, resource, record_id, record_label, deleted_at, deleted_by_name, purge_reason, purged_by, purged_by_name)
+        VALUES (${crypto.randomUUID()}, ${resource}, ${row.id}, ${cfg.label(row)}, ${row.deleted_at}, ${row.deleted_by_name || null}, 'auto', NULL, NULL)
+      `;
+      await sql.query(`DELETE FROM ${cfg.table} WHERE id = $1`, [row.id]);
+    }
+  }
+}
+// Shared by both handleUsers' and handleHybrid's PUT ?purge=1 branches: an
+// Admin/Principal jumping the retention queue to remove one specific
+// already-soft-deleted record right now, instead of waiting out
+// TRASH_RETENTION_DAYS. Unlike the two-person approval needed to soft-
+// delete a student in the first place, this doesn't need a second
+// approver — that decision was already made (twice, for students) to get
+// the record into the bin; this step is just disposal, so it's guarded
+// the way GitHub guards deleting a repo: type the record's own identifier
+// to prove you mean it, restricted to Admin/Principal, and logged.
+async function purgeOneRecord(req, res, resource) {
+  const cfg = PURGEABLE_RESOURCES[resource];
+  const { id } = req.query;
+  if (!id) return res.status(400).json({ error: 'Missing id.' });
+  const rows = await sql.query(`SELECT * FROM ${cfg.table} WHERE id = $1 AND deleted_at IS NOT NULL`, [id]);
+  if (!rows.length) return res.status(404).json({ error: 'That record is not in Recently Deleted (already restored, purged, or never existed).' });
+  const row = rows[0];
+  const expected = (row[cfg.confirmField] || '').toString().trim().toLowerCase();
+  const given = ((req.body && req.body.confirmText) || '').toString().trim().toLowerCase();
+  if (!given || given !== expected) {
+    return res.status(400).json({ error: `Type the exact ${cfg.confirmLabel} to confirm — this cannot be undone.` });
+  }
+  await sql`
+    INSERT INTO purge_log (id, resource, record_id, record_label, deleted_at, deleted_by_name, purge_reason, purged_by, purged_by_name)
+    VALUES (${crypto.randomUUID()}, ${resource}, ${row.id}, ${cfg.label(row)}, ${row.deleted_at}, ${row.deleted_by_name || null}, 'manual', ${req.authUser.id}, ${req.authUser.name})
+  `;
+  await sql.query(`DELETE FROM ${cfg.table} WHERE id = $1`, [id]);
+  return res.status(200).json({ ok: true });
 }
 
 // ---------- Deletion requests (two-person approval for deleteViaApprovalOnly resources) ----------
@@ -1471,7 +1613,12 @@ async function handleDeletionRequests(req, res) {
     // reqRow.status === 'Pending Final Approval' — this is the second,
     // final approval, so this is the only branch that actually deletes.
     const target = DELETION_REQUEST_TARGETS[reqRow.resource];
-    if (target) await sql.query(`UPDATE ${target.table} SET deleted_at = now() WHERE id = $1`, [reqRow.record_id]);
+    if (target) {
+      await sql.query(
+        `UPDATE ${target.table} SET deleted_at = now(), deleted_by = $2, deleted_by_name = $3 WHERE id = $1`,
+        [reqRow.record_id, req.authUser.id, req.authUser.name]
+      );
+    }
     await sql`
       UPDATE deletion_requests SET status = 'Approved',
         decided_by = ${req.authUser.id}, decided_by_name = ${req.authUser.name}, decided_at = now(),
