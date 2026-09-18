@@ -679,6 +679,10 @@ const PUBLIC_API_ROUTES = [
   // from this list, every call to it was rejected right here with "Not
   // logged in." before the route ever got a chance to check that header.
   { path: '/api/vendor/wipe-data', methods: ['POST'] },
+  // Same reasoning again — the vendor dashboard's daily automatic-backup
+  // read (see the route itself far below), authenticated purely by its own
+  // VENDOR_API_KEY header, never by a logged-in school Admin's session.
+  { path: '/api/vendor/backup-snapshot', methods: ['GET'] },
   { path: '/api/admission-inquiries', methods: ['POST'] },
   { path: '/api/comms-messages', methods: ['GET'] },
   { path: '/api/website-gallery', methods: ['GET'] },
@@ -2770,6 +2774,43 @@ app.post('/api/vendor/wipe-data', async (req, res) => {
   } catch (err) {
     console.error('vendor wipe-data error:', err);
     return res.status(500).json({ error: 'Something went wrong on the server — nothing was wiped (the transaction only commits if every step succeeds).' });
+  }
+});
+
+// GET /api/vendor/backup-snapshot — a read-only counterpart to the hard
+// wipe above: exactly the same tables (WIPE_TABLES), exactly the same
+// shape of response, but nothing is ever deleted here. The vendor
+// dashboard calls this once a day (see its own README-DEPLOY) to keep a
+// rolling automatic backup on file even for a school that never touches
+// the wipe button, plus whenever a vendor admin clicks "Back Up Now".
+// Authenticated the same way every other vendor-only route on this server
+// is — the school's own VENDOR_API_KEY, sent as a plain header for this
+// direct server-to-server call — and needs no extra confirmation the way
+// the wipe does, since reading data can't destroy anything.
+app.get('/api/vendor/backup-snapshot', async (req, res) => {
+  try {
+    const key = req.headers['x-vendor-api-key'];
+    if (!process.env.VENDOR_API_KEY || !key || key !== process.env.VENDOR_API_KEY) {
+      return res.status(401).json({ error: 'Invalid or missing vendor API key.' });
+    }
+    const infoRows = await sql`SELECT data FROM school_info WHERE id = 1`;
+    const actualName = (infoRows[0] && infoRows[0].data && infoRows[0].data.name) || '';
+    const snapshotAt = new Date().toISOString();
+    const tables = {};
+    for (const table of WIPE_TABLES) {
+      tables[table] = await sql.query(`SELECT * FROM ${table}`);
+    }
+    const counts = Object.fromEntries(WIPE_TABLES.map(t => [t, tables[t].length]));
+    return res.status(200).json({
+      ok: true,
+      schoolName: actualName,
+      snapshotAt,
+      counts,
+      backup: { schoolName: actualName, snapshotAt, tables },
+    });
+  } catch (err) {
+    console.error('vendor backup-snapshot error:', err);
+    return res.status(500).json({ error: 'Something went wrong on the server taking the backup snapshot.' });
   }
 });
 

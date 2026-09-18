@@ -114,6 +114,48 @@ async function schoolErpApi(school, apiPath) {
   return data;
 }
 
+const BACKUP_RETENTION_PER_SCHOOL = 14;
+
+// Takes one snapshot of one school's data via that school's own
+// /api/vendor/backup-snapshot (the same read-only counterpart to the
+// hard-wipe backup), records the outcome in vendor_backups either way —
+// success with the data, or failure with just the error message so a
+// silently-failing school is still visible — and trims that school's rows
+// back down to the most recent BACKUP_RETENTION_PER_SCHOOL. Used by both
+// the daily cron route and the "Back Up Now" button, so they can never
+// drift out of sync with each other.
+async function runBackupForSchool(school) {
+  const id = 'bkp_' + crypto.randomBytes(8).toString('hex');
+  let data;
+  try {
+    data = await schoolErpApi(school, '/api/vendor/backup-snapshot');
+  } catch (err) {
+    const errMsg = err.message || "Could not reach that school's ERP.";
+    await sql`INSERT INTO vendor_backups (id, school_id, ok, error) VALUES (${id}, ${school.id}, false, ${errMsg})`;
+    return { ok: false, error: errMsg };
+  }
+  if (!data || !data.ok || !data.backup) {
+    const errMsg = (data && data.error) || "That school's ERP didn't return a usable backup.";
+    await sql`INSERT INTO vendor_backups (id, school_id, ok, error) VALUES (${id}, ${school.id}, false, ${errMsg})`;
+    return { ok: false, error: errMsg };
+  }
+  const backupJson = JSON.stringify(data.backup);
+  const sizeBytes = Buffer.byteLength(backupJson, 'utf8');
+  await sql`
+    INSERT INTO vendor_backups (id, school_id, ok, counts, size_bytes, backup_data)
+    VALUES (${id}, ${school.id}, true, ${JSON.stringify(data.counts || {})}::jsonb, ${sizeBytes}, ${backupJson}::jsonb)
+  `;
+  await sql`
+    DELETE FROM vendor_backups
+    WHERE school_id = ${school.id}
+      AND id NOT IN (
+        SELECT id FROM vendor_backups WHERE school_id = ${school.id}
+        ORDER BY created_at DESC LIMIT ${BACKUP_RETENTION_PER_SCHOOL}
+      )
+  `;
+  return { ok: true, id, counts: data.counts, sizeBytes };
+}
+
 // ---------- Schema ----------
 async function ensureSchema() {
   await sql`
@@ -325,6 +367,28 @@ async function ensureSchema() {
     )
   `;
   await sql`CREATE INDEX IF NOT EXISTS idx_vendor_wipe_actions_school_id ON vendor_wipe_actions (school_id, created_at DESC)`;
+  // A daily snapshot of every school's data (same content a hard-wipe backs
+  // up — see WIPE_TABLES in that school's own server.js), taken by an
+  // external Render Cron Job hitting POST /api/cron/run-backups below, plus
+  // whatever a vendor admin triggers by hand with "Back Up Now". Rows for
+  // failed attempts are kept too (ok=false, error set, backup_data null) so
+  // a run that silently failed is still visible in the Backups list instead
+  // of just not appearing. Trimmed to the most recent BACKUP_RETENTION_PER_SCHOOL
+  // rows per school right after every successful run, so this table's size
+  // stays bounded instead of growing forever.
+  await sql`
+    CREATE TABLE IF NOT EXISTS vendor_backups (
+      id TEXT PRIMARY KEY,
+      school_id TEXT NOT NULL REFERENCES schools(id) ON DELETE CASCADE,
+      created_at TIMESTAMPTZ NOT NULL DEFAULT now(),
+      ok BOOLEAN NOT NULL DEFAULT true,
+      error TEXT,
+      counts JSONB NOT NULL DEFAULT '{}'::jsonb,
+      size_bytes INTEGER NOT NULL DEFAULT 0,
+      backup_data JSONB
+    )
+  `;
+  await sql`CREATE INDEX IF NOT EXISTS idx_vendor_backups_school_id ON vendor_backups (school_id, created_at DESC)`;
   // SVM EdTech's own running costs (hosting, domains, tools, etc.) — kept
   // here so the Accounting tab can show a real net cash position, not just
   // what schools owe you.
@@ -449,6 +513,10 @@ const PUBLIC_API_ROUTES = [
   // MARKETING_SITE_ORIGIN, not authenticated by anything else (there's no
   // school or vendor session to check; anyone can ask about the product).
   { path: '/api/public/leads', methods: ['POST'] },
+  // Hit once a day by an external Render Cron Job, not a logged-in vendor
+  // admin — authenticated by its own CRON_SECRET header instead of a
+  // session cookie (see the route itself, far below).
+  { path: '/api/cron/run-backups', methods: ['POST'] },
 ];
 function isPublicApiRoute(req) {
   return PUBLIC_API_ROUTES.some(r => r.path === req.path && r.methods.includes(req.method));
@@ -1664,6 +1732,88 @@ app.post('/api/schools/:id/wipe-data', async (req, res) => {
   } catch (err) {
     console.error('wipe data error:', err);
     if (err.name === 'AbortError') return res.status(504).json({ error: "That school's ERP took too long to respond — check there directly before trying again." });
+    return res.status(500).json({ error: 'Something went wrong on the server.' });
+  }
+});
+
+// Fired once a day by an external Render Cron Job (see README-DEPLOY for
+// the schedule) — deliberately not a logged-in vendor admin, since nobody's
+// meant to be sitting at a keyboard for this. Authenticated by its own
+// CRON_SECRET env var instead of a session cookie, exempted above in
+// PUBLIC_API_ROUTES. Runs every school that has an ERP URL on file, one at
+// a time — one school's failure (ERP asleep, wrong key, etc.) is recorded
+// and skipped, never allowed to stop the rest of the fleet from backing up.
+app.post('/api/cron/run-backups', async (req, res) => {
+  const secret = req.headers['x-cron-secret'];
+  if (!process.env.CRON_SECRET || !secret || secret !== process.env.CRON_SECRET) {
+    return res.status(401).json({ error: 'Invalid or missing cron secret.' });
+  }
+  try {
+    const schools = await sql`SELECT * FROM schools WHERE erp_url IS NOT NULL AND erp_url != ''`;
+    const results = [];
+    for (const school of schools) {
+      const result = await runBackupForSchool(school);
+      results.push({ schoolId: school.id, schoolName: school.name, ok: result.ok, error: result.error });
+    }
+    return res.status(200).json({ ok: true, ranAt: new Date().toISOString(), schoolCount: schools.length, results });
+  } catch (err) {
+    console.error('run-backups cron error:', err);
+    return res.status(500).json({ error: 'Something went wrong running scheduled backups.' });
+  }
+});
+
+// A vendor admin clicking "Back Up Now" for one school, outside the daily
+// schedule — same runBackupForSchool as the cron route above, so the two
+// can never behave differently.
+app.post('/api/schools/:id/backups/run-now', async (req, res) => {
+  if (!req.authAdmin) return res.status(401).json({ error: 'Not logged in.' });
+  try {
+    const rows = await sql`SELECT * FROM schools WHERE id = ${req.params.id}`;
+    if (!rows.length) return res.status(404).json({ error: 'School not found.' });
+    const result = await runBackupForSchool(rows[0]);
+    if (!result.ok) return res.status(502).json({ error: result.error || 'Backup failed.' });
+    return res.status(200).json({ ok: true, id: result.id, counts: result.counts, sizeBytes: result.sizeBytes });
+  } catch (err) {
+    console.error('run-now backup error:', err);
+    return res.status(500).json({ error: 'Something went wrong on the server.' });
+  }
+});
+
+// List (metadata only — no backup_data, so this stays fast and light even
+// with 14 backups on file) for the Backups modal.
+app.get('/api/schools/:id/backups', async (req, res) => {
+  if (!req.authAdmin) return res.status(401).json({ error: 'Not logged in.' });
+  try {
+    const rows = await sql`
+      SELECT id, created_at, ok, error, counts, size_bytes FROM vendor_backups
+      WHERE school_id = ${req.params.id} ORDER BY created_at DESC LIMIT 50
+    `;
+    return res.status(200).json(rows.map(r => ({
+      id: r.id, createdAt: r.created_at, ok: r.ok, error: r.error, counts: r.counts, sizeBytes: r.size_bytes,
+    })));
+  } catch (err) {
+    console.error('list backups error:', err);
+    return res.status(500).json({ error: 'Something went wrong on the server.' });
+  }
+});
+
+// Streams one stored backup back down as a downloadable JSON file.
+app.get('/api/schools/:id/backups/:backupId/download', async (req, res) => {
+  if (!req.authAdmin) return res.status(401).json({ error: 'Not logged in.' });
+  try {
+    const rows = await sql`
+      SELECT * FROM vendor_backups WHERE id = ${req.params.backupId} AND school_id = ${req.params.id}
+    `;
+    if (!rows.length || !rows[0].backup_data) return res.status(404).json({ error: 'Backup not found.' });
+    const schoolRows = await sql`SELECT name FROM schools WHERE id = ${req.params.id}`;
+    const schoolName = (schoolRows[0] && schoolRows[0].name) || 'school';
+    const dateStr = new Date(rows[0].created_at).toISOString().slice(0, 10);
+    const filename = `${schoolName.replace(/[^a-z0-9]+/gi, '-')}-backup-${dateStr}.json`;
+    res.setHeader('Content-Type', 'application/json');
+    res.setHeader('Content-Disposition', `attachment; filename="${filename}"`);
+    return res.status(200).send(JSON.stringify(rows[0].backup_data));
+  } catch (err) {
+    console.error('download backup error:', err);
     return res.status(500).json({ error: 'Something went wrong on the server.' });
   }
 });

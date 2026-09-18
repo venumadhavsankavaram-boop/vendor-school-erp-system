@@ -581,6 +581,20 @@
   </div>
 </div>
 
+<!-- Backups Modal -->
+<div class="modal-overlay" id="backupsModalOverlay">
+  <div class="modal" style="width:min(640px, 100%);">
+    <h3 id="backupsModalTitle">Backups</h3>
+    <div class="modal-sub">A full snapshot of this school's data is taken automatically once a day and the last 14 are kept. Download any of them below, or take one right now.</div>
+    <button type="button" class="btn btn-light" id="btnRunBackupNow" style="margin-bottom:14px;">Back Up Now</button>
+    <div id="backupsListWrap" style="max-height:360px; overflow-y:auto;"></div>
+    <div class="modal-actions">
+      <div></div>
+      <div class="right"><button type="button" class="btn btn-light" id="btnCloseBackups">Close</button></div>
+    </div>
+  </div>
+</div>
+
 <!-- Enquiries Modal -->
 <div class="modal-overlay" id="enquiriesModalOverlay">
   <div class="modal" style="width:min(680px, 100%);">
@@ -1398,6 +1412,7 @@ function renderSchoolsTable(schools) {
                 ${s.erpUrl ? `<button class="btn btn-light btn-sm" data-action="support-login" data-id="${s.id}">Support Login</button>` : ''}
                 <button class="btn btn-light btn-sm" data-action="deploys" data-id="${s.id}">Deploys</button>
                 ${s.erpUrl ? `<button class="btn btn-light btn-sm" data-action="enquiries" data-id="${s.id}">Enquiries</button>` : ''}
+                ${s.erpUrl ? `<button class="btn btn-light btn-sm" data-action="backups" data-id="${s.id}">Backups</button>` : ''}
               </div>
             </td>
           </tr>
@@ -1419,6 +1434,9 @@ function renderSchoolsTable(schools) {
   });
   wrap.querySelectorAll('[data-action="enquiries"]').forEach(btn => {
     btn.addEventListener('click', () => openEnquiriesModal(btn.dataset.id));
+  });
+  wrap.querySelectorAll('[data-action="backups"]').forEach(btn => {
+    btn.addEventListener('click', () => openBackupsModal(btn.dataset.id));
   });
 }
 
@@ -1493,6 +1511,78 @@ async function rollbackDeploy(deployId) {
 }
 
 $('#btnCloseDeploys').addEventListener('click', () => $('#deploysModalOverlay').classList.remove('open'));
+
+/* ---------- Backups: automatic daily snapshots ---------- */
+let backupsSchoolId = null;
+
+async function openBackupsModal(id) {
+  const s = schoolsCache.find(x => x.id === id);
+  if (!s) return;
+  backupsSchoolId = id;
+  $('#backupsModalTitle').textContent = 'Backups — ' + s.name;
+  $('#backupsListWrap').innerHTML = '<div class="empty-state">Loading…</div>';
+  $('#backupsModalOverlay').classList.add('open');
+  try {
+    const backups = await api('/api/schools/' + id + '/backups');
+    renderBackupsList(backups);
+  } catch (err) {
+    $('#backupsListWrap').innerHTML = `<div class="empty-state">${esc(err.message)}</div>`;
+  }
+}
+
+function fmtBytes(n) {
+  if (!n) return '0 KB';
+  if (n < 1024 * 1024) return Math.max(1, Math.round(n / 1024)) + ' KB';
+  return (n / (1024 * 1024)).toFixed(1) + ' MB';
+}
+
+function renderBackupsList(backups) {
+  const wrap = $('#backupsListWrap');
+  if (!backups.length) {
+    wrap.innerHTML = '<div class="empty-state">No backups yet — click "Back Up Now" to take the first one.</div>';
+    return;
+  }
+  wrap.innerHTML = backups.map(b => {
+    const total = b.counts ? Object.values(b.counts).reduce((a, c) => a + c, 0) : 0;
+    return `
+    <div class="deploy-row">
+      <div class="info">
+        <b>${esc(new Date(b.createdAt).toLocaleString())}${b.ok ? '' : ' — Failed'}</b>
+        <span>${b.ok ? `${total} records · ${fmtBytes(b.sizeBytes)} · ${relativeTime(b.createdAt)}` : esc(b.error || 'unknown error')}</span>
+      </div>
+      ${b.ok ? `<button class="btn btn-light btn-sm" data-action="download-backup" data-id="${b.id}">Download</button>` : ''}
+    </div>
+  `;
+  }).join('');
+  wrap.querySelectorAll('[data-action="download-backup"]').forEach(btn => {
+    btn.addEventListener('click', () => downloadBackup(btn.dataset.id));
+  });
+}
+
+function downloadBackup(backupId) {
+  if (!backupsSchoolId) return;
+  window.open('/api/schools/' + backupsSchoolId + '/backups/' + backupId + '/download', '_blank');
+}
+
+$('#btnRunBackupNow').addEventListener('click', async () => {
+  if (!backupsSchoolId) return;
+  const btn = $('#btnRunBackupNow');
+  btn.disabled = true;
+  btn.textContent = 'Backing up…';
+  try {
+    await api('/api/schools/' + backupsSchoolId + '/backups/run-now', { method: 'POST' });
+    showToast('Backup complete.');
+    const backups = await api('/api/schools/' + backupsSchoolId + '/backups');
+    renderBackupsList(backups);
+  } catch (err) {
+    showToast('Backup failed: ' + err.message);
+  } finally {
+    btn.disabled = false;
+    btn.textContent = 'Back Up Now';
+  }
+});
+
+$('#btnCloseBackups').addEventListener('click', () => $('#backupsModalOverlay').classList.remove('open'));
 
 $('#btnScanGuardrail').addEventListener('click', async () => {
   const text = $('#fGuardrailText').value;

@@ -679,6 +679,7 @@
   .f-field{display:flex; flex-direction:column; gap:6px;}
   .f-field.full{grid-column:1/-1;}
   .f-field label{font-size:0.8rem; font-weight:600; color:var(--navy);}
+  .required-star{color:#dc2626; font-weight:800; margin-left:2px;}
   .f-field input, .f-field select, .f-field textarea{
     font-family:'Poppins',sans-serif; font-size:0.88rem; padding:10px 12px; border-radius:9px;
     border:1.5px solid var(--border); outline:none; transition:border-color 0.16s ease, box-shadow 0.16s ease;
@@ -1135,8 +1136,8 @@
           <div class="dropdown-menu" id="moreActionsMenu">
             <button type="button" onclick="downloadIdCards()">Download ID Cards</button>
             <button type="button" onclick="showGroupsClubs()">Groups &amp; Clubs</button>
-            <button type="button" onclick="downloadImportTemplate()">Download Import Template (Excel)</button>
-            <button type="button" id="btnImportStudents" onclick="document.getElementById('importFileInput').click()">Import Students (Excel)</button>
+            <button type="button" onclick="downloadImportTemplate()" title="Required columns for every row: First Name, Last Name, Class, Section">Download Import Template (Excel)</button>
+            <button type="button" id="btnImportStudents" onclick="document.getElementById('importFileInput').click()" title="Required columns for every row: First Name, Last Name, Class, Section">Import Students (Excel)</button>
             <button type="button" id="btnExportStudentsExcel" onclick="exportExcel()">Export Students (Excel)</button>
             <button type="button" id="btnExportStudentsPDF" onclick="exportStudentsPDF()">Export Students (PDF)</button>
             <button type="button" onclick="openTransferCertPicker()">Transfer Certificates</button>
@@ -1500,7 +1501,7 @@
       <div class="topbar"><div><h1>Contact Vendor</h1><p>Send a support issue or customization request straight to your vendor — it lands in their dashboard against this school, and they can reply from there.</p></div></div>
       <div class="profile-card" style="max-width:560px;">
         <div class="form-grid">
-          <div class="f-field full"><label>Subject *</label><input type="text" id="cvSubject" maxlength="300" placeholder="Short summary, e.g. Need a new fee report format"></div>
+          <div class="f-field full"><label>Subject <span class="required-star">*</span></label><input type="text" id="cvSubject" maxlength="300" placeholder="Short summary, e.g. Need a new fee report format"></div>
           <div class="f-field">
             <label>Type</label>
             <select id="cvType">
@@ -1516,7 +1517,7 @@
               <option value="high">High</option>
             </select>
           </div>
-          <div class="f-field full"><label>Message *</label><textarea id="cvMessage" rows="6" placeholder="Describe what you need, or what isn't working..."></textarea></div>
+          <div class="f-field full"><label>Message <span class="required-star">*</span></label><textarea id="cvMessage" rows="6" placeholder="Describe what you need, or what isn't working..."></textarea></div>
         </div>
         <button class="btn btn-primary btn-sm" style="margin-top:14px;" onclick="submitContactVendor()">Send to Vendor</button>
       </div>
@@ -1569,7 +1570,7 @@
     <div class="modal-inner">
       <button class="modal-close" onclick="closeWizard()">&times;</button>
       <h2 id="wizardTitle">Add Student</h2>
-      <p class="modal-sub">Fields marked * are required. Use the tabs below to fill in each section.</p>
+      <p class="modal-sub">Fields marked <span class="required-star">*</span> are required. Use the tabs below to fill in each section.</p>
 
       <div class="wizard-tabs">
         <button type="button" class="wtab active" id="wtab-new" onclick="switchWizardTab('new')">1. New Student</button>
@@ -1596,21 +1597,21 @@
           </div>
           <div class="form-grid">
             <div class="f-field">
-              <label>First Name *</label>
+              <label>First Name <span class="required-star">*</span></label>
               <input type="text" id="fFirstName" required placeholder="e.g. Priya">
             </div>
             <div class="f-field">
-              <label>Last Name (Surname) *</label>
+              <label>Last Name (Surname) <span class="required-star">*</span></label>
               <input type="text" id="fLastName" required placeholder="e.g. Kumar">
             </div>
             <div class="f-field">
-              <label>Class *</label>
+              <label>Class <span class="required-star">*</span></label>
               <select id="fClass" required onchange="onNewAdmissionToggle(); refreshFSectionOptions();">
                 <option value="" disabled selected>Select class</option>
               </select>
             </div>
             <div class="f-field">
-              <label>Section *</label>
+              <label>Section <span class="required-star">*</span></label>
               <select id="fSection" required>
                 <option value="" disabled selected>Select section</option>
               </select>
@@ -1810,13 +1811,13 @@
       <form id="paymentForm" onsubmit="return savePayment(event)">
         <div class="form-grid">
           <div class="f-field full">
-            <label>Student *</label>
+            <label>Student <span class="required-star">*</span></label>
             <select id="pStudent" required onchange="updatePaymentSummary()">
               <option value="" disabled selected>Select student</option>
             </select>
           </div>
           <div class="f-field">
-            <label>Category *</label>
+            <label>Category <span class="required-star">*</span></label>
             <select id="pCategory" required onchange="updatePaymentSummary()">
               <option value="fee">Fee</option>
               <option value="bus">Bus Fee</option>
@@ -1831,7 +1832,7 @@
             </select>
           </div>
           <div class="f-field">
-            <label>Amount Received (₹) *</label>
+            <label>Amount Received (₹) <span class="required-star">*</span></label>
             <input type="number" id="pAmount" min="0" step="1" required placeholder="0" oninput="updatePaymentSummary()">
           </div>
           <div class="f-field">
@@ -1877,11 +1878,11 @@
         <input type="hidden" id="editUserId">
         <div class="form-grid">
           <div class="f-field full">
-            <label>Full Name *</label>
+            <label>Full Name <span class="required-star">*</span></label>
             <input type="text" id="uName" required placeholder="e.g. S. Raghu Ram" oninput="onUserNameInput()">
           </div>
           <div class="f-field full">
-            <label>Username *</label>
+            <label>Username <span class="required-star">*</span></label>
             <div style="display:flex; gap:10px; align-items:center;">
               <input type="text" id="uUsername" required placeholder="e.g. raghuram" style="flex:1;" oninput="onUserUsernameInput()">
               <button type="button" class="btn btn-ghost btn-sm" onclick="autoGenerateUsername()">Generate</button>
@@ -1895,7 +1896,7 @@
             </div>
           </div>
           <div class="f-field full">
-            <label>Role *</label>
+            <label>Role <span class="required-star">*</span></label>
             <select id="uRole" required onchange="toggleUserStudentField()"></select>
           </div>
           <div class="f-field full" id="uStudentField" style="display:none;">
@@ -1984,8 +1985,8 @@
       <form onsubmit="return saveSyllabusTopic(event)">
         <div class="form-grid">
           <div class="f-field"><label>Section</label><select id="syTopicSection"><option value="">All Sections</option></select></div>
-          <div class="f-field"><label>Subject *</label><select id="syTopicSubject" required><option value="">Select subject</option></select></div>
-          <div class="f-field full"><label>Topic / Chapter *</label><input type="text" id="syTopicName" required placeholder="e.g. Fractions — Chapter 4"></div>
+          <div class="f-field"><label>Subject <span class="required-star">*</span></label><select id="syTopicSubject" required><option value="">Select subject</option></select></div>
+          <div class="f-field full"><label>Topic / Chapter <span class="required-star">*</span></label><input type="text" id="syTopicName" required placeholder="e.g. Fractions — Chapter 4"></div>
           <div class="f-field"><label>Status</label><select id="syTopicStatus"><option>Not Started</option><option>In Progress</option><option>Completed</option></select></div>
           <div class="f-field"><label>Target Date</label><input type="date" id="syTopicTargetDate"></div>
           <div class="f-field full"><label>Notes</label><textarea id="syTopicNotes" rows="2" placeholder="Optional"></textarea></div>
@@ -2008,8 +2009,8 @@
       <form onsubmit="return saveHomework(event)">
         <div class="form-grid">
           <div class="f-field"><label>Section</label><select id="hwSection"><option value="">All Sections</option></select></div>
-          <div class="f-field"><label>Subject *</label><select id="hwSubject" required><option value="">Select subject</option></select></div>
-          <div class="f-field full"><label>Title *</label><input type="text" id="hwTitle" required placeholder="e.g. Worksheet 3 — Fractions"></div>
+          <div class="f-field"><label>Subject <span class="required-star">*</span></label><select id="hwSubject" required><option value="">Select subject</option></select></div>
+          <div class="f-field full"><label>Title <span class="required-star">*</span></label><input type="text" id="hwTitle" required placeholder="e.g. Worksheet 3 — Fractions"></div>
           <div class="f-field full"><label>Description</label><textarea id="hwDescription" rows="3" placeholder="Optional — instructions, page numbers, etc."></textarea></div>
           <div class="f-field"><label>Assigned Date</label><input type="date" id="hwAssignedDate"></div>
           <div class="f-field"><label>Due Date</label><input type="date" id="hwDueDate"></div>
@@ -2029,7 +2030,7 @@
     <div class="modal-inner">
       <button class="modal-close" onclick="closeStaffWizard()">&times;</button>
       <h2 id="staffModalTitle">Add Staff</h2>
-      <p class="modal-sub">Fields marked * are required. Use the tabs below to fill in each section.</p>
+      <p class="modal-sub">Fields marked <span class="required-star">*</span> are required. Use the tabs below to fill in each section.</p>
       <div class="wizard-tabs" style="margin-bottom:20px;">
         <button type="button" class="wtab active" id="stfwtab-personal" onclick="switchStaffWizardTab('personal')">1. Personal</button>
         <button type="button" class="wtab" id="stfwtab-professional" onclick="switchStaffWizardTab('professional')">2. Professional</button>
@@ -2056,10 +2057,10 @@
             </div>
           </div>
           <div class="form-grid">
-            <div class="f-field"><label>First Name *</label><input type="text" id="stfFirstName" required placeholder="e.g. Lakshmi"></div>
-            <div class="f-field"><label>Last Name *</label><input type="text" id="stfLastName" required placeholder="e.g. Kumari"></div>
-            <div class="f-field"><label>Gender *</label><select id="stfGender" required><option value="" disabled selected>Select gender</option><option>Male</option><option>Female</option><option>Other</option></select></div>
-            <div class="f-field"><label>Date of Birth *</label><input type="date" id="stfDob" required></div>
+            <div class="f-field"><label>First Name <span class="required-star">*</span></label><input type="text" id="stfFirstName" required placeholder="e.g. Lakshmi"></div>
+            <div class="f-field"><label>Last Name <span class="required-star">*</span></label><input type="text" id="stfLastName" required placeholder="e.g. Kumari"></div>
+            <div class="f-field"><label>Gender <span class="required-star">*</span></label><select id="stfGender" required><option value="" disabled selected>Select gender</option><option>Male</option><option>Female</option><option>Other</option></select></div>
+            <div class="f-field"><label>Date of Birth <span class="required-star">*</span></label><input type="date" id="stfDob" required></div>
             <div class="f-field"><label>Blood Group</label><select id="stfBlood"><option value="">Select blood group</option><option>A+</option><option>A-</option><option>B+</option><option>B-</option><option>AB+</option><option>AB-</option><option>O+</option><option>O-</option></select></div>
             <div class="f-field"><label>Aadhar Number</label><input type="text" id="stfAadhar" placeholder="12-digit Aadhaar number" inputmode="numeric" maxlength="12" oninput="this.value=this.value.replace(/\D/g,'').slice(0,12)"></div>
           </div>
@@ -2067,9 +2068,9 @@
 
         <div class="wtab-panel" id="stfpanel-professional" style="display:none;">
           <div class="form-grid">
-            <div class="f-field"><label>Department *</label><select id="stfDept" required></select></div>
-            <div class="f-field"><label>Role / Designation *</label><select id="stfDesignation" required></select></div>
-            <div class="f-field"><label>Date of Joining *</label><input type="date" id="stfDoj" required></div>
+            <div class="f-field"><label>Department <span class="required-star">*</span></label><select id="stfDept" required></select></div>
+            <div class="f-field"><label>Role / Designation <span class="required-star">*</span></label><select id="stfDesignation" required></select></div>
+            <div class="f-field"><label>Date of Joining <span class="required-star">*</span></label><input type="date" id="stfDoj" required></div>
             <div class="f-field"><label>Status</label><select id="stfStatus"><option>Active</option><option>Inactive</option></select></div>
             <div class="f-field"><label>Qualification</label><input type="text" id="stfQualification" placeholder="e.g. M.Sc, B.Ed"></div>
             <div class="f-field"><label>Experience (years)</label><input type="number" min="0" id="stfExperience" placeholder="e.g. 5"></div>
@@ -2120,9 +2121,9 @@
 
         <div class="wtab-panel" id="stfpanel-contact" style="display:none;">
           <div class="form-grid">
-            <div class="f-field"><label>Phone *</label><input type="text" id="stfPhone" required placeholder="10-digit mobile number" inputmode="numeric" maxlength="10" oninput="this.value=this.value.replace(/\D/g,'').slice(0,10)"></div>
-            <div class="f-field"><label>Email *</label><input type="email" id="stfEmail" required placeholder="staff@example.com"></div>
-            <div class="f-field full"><label>Address *</label><input type="text" id="stfAddress" required placeholder="Full address"></div>
+            <div class="f-field"><label>Phone <span class="required-star">*</span></label><input type="text" id="stfPhone" required placeholder="10-digit mobile number" inputmode="numeric" maxlength="10" oninput="this.value=this.value.replace(/\D/g,'').slice(0,10)"></div>
+            <div class="f-field"><label>Email <span class="required-star">*</span></label><input type="email" id="stfEmail" required placeholder="staff@example.com"></div>
+            <div class="f-field full"><label>Address <span class="required-star">*</span></label><input type="text" id="stfAddress" required placeholder="Full address"></div>
             <div class="f-field"><label>Emergency Contact Name</label><input type="text" id="stfEmergencyName" placeholder="Optional"></div>
             <div class="f-field"><label>Emergency Contact Phone</label><input type="text" id="stfEmergencyPhone" placeholder="Optional" inputmode="numeric" maxlength="10" oninput="this.value=this.value.replace(/\D/g,'').slice(0,10)"></div>
           </div>
@@ -2160,12 +2161,12 @@
       <form id="masterSubjectForm" onsubmit="return saveMasterSubject(event)">
         <input type="hidden" id="editMasterSubjectId">
         <div class="form-grid">
-          <div class="f-field"><label>Subject Name *</label><input type="text" id="msName" required placeholder="e.g. Mathematics" oninput="checkMsNameDuplicate()"></div>
+          <div class="f-field"><label>Subject Name <span class="required-star">*</span></label><input type="text" id="msName" required placeholder="e.g. Mathematics" oninput="checkMsNameDuplicate()"></div>
           <div class="f-field full" id="msNameDupeWarning" style="display:none; color:var(--magenta); font-size:0.78rem; margin-top:-8px;"></div>
           <div class="f-field"><label>Subject Code</label><input type="text" id="msCode" placeholder="e.g. MATH101"></div>
-          <div class="f-field"><label>Course *</label><select id="msClass" required onchange="checkMsNameDuplicate()"></select></div>
+          <div class="f-field"><label>Course <span class="required-star">*</span></label><select id="msClass" required onchange="checkMsNameDuplicate()"></select></div>
         </div>
-        <label style="font-size:0.8rem; font-weight:600; color:var(--navy); margin:12px 0 6px; display:block;">Sections *</label>
+        <label style="font-size:0.8rem; font-weight:600; color:var(--navy); margin:12px 0 6px; display:block;">Sections <span class="required-star">*</span></label>
         <div id="msSectionsBox" style="display:flex; gap:20px; margin-bottom:16px;"></div>
         <label style="font-size:0.8rem; font-weight:600; color:var(--navy); margin:0 0 6px; display:block;">Staff</label>
         <div id="msStaffBox" class="disc-checklist" style="max-height:150px; margin-bottom:16px;"></div>
@@ -2191,16 +2192,16 @@
       <form id="subjectForm" onsubmit="return saveSubjectModal(event)">
         <input type="hidden" id="editSubjectOriginalName">
         <div class="form-grid">
-          <div class="f-field"><label>Subject Name *</label><input type="text" id="subjName" required placeholder="e.g. Mathematics" list="masterSubjectsDatalist"><datalist id="masterSubjectsDatalist"></datalist></div>
+          <div class="f-field"><label>Subject Name <span class="required-star">*</span></label><input type="text" id="subjName" required placeholder="e.g. Mathematics" list="masterSubjectsDatalist"><datalist id="masterSubjectsDatalist"></datalist></div>
           <div class="f-field"><label>Course</label><input type="text" id="subjCourse" disabled></div>
         </div>
-        <label style="font-size:0.8rem; font-weight:600; color:var(--navy); margin:12px 0 6px; display:block;">Sections *</label>
+        <label style="font-size:0.8rem; font-weight:600; color:var(--navy); margin:12px 0 6px; display:block;">Sections <span class="required-star">*</span></label>
         <div id="subjSectionsBox" style="display:flex; gap:20px; margin-bottom:16px;"></div>
         <label style="font-size:0.8rem; font-weight:600; color:var(--navy); margin:0 0 6px; display:block;">Staff</label>
         <div id="subjStaffBox" class="disc-checklist" style="max-height:130px; margin-bottom:16px;"></div>
         <div class="form-grid">
           <div class="f-field"><label>Max Marks</label><input type="number" min="1" id="subjMaxMarks" value="100"></div>
-          <div class="f-field"><label>Exam Date *</label><input type="date" id="subjDate" required></div>
+          <div class="f-field"><label>Exam Date <span class="required-star">*</span></label><input type="date" id="subjDate" required></div>
         </div>
         <p style="font-size:0.76rem; color:var(--ink-soft); margin:2px 0 10px;">Every subject needs its own exam date before hall tickets (admit cards) can be generated for this class.</p>
         <div style="display:flex; gap:30px; margin:16px 0 4px; flex-wrap:wrap;">
@@ -2227,11 +2228,11 @@
         <input type="hidden" id="editExamId">
         <div class="form-grid">
           <div class="f-field full">
-            <label>Exam Name *</label>
+            <label>Exam Name <span class="required-star">*</span></label>
             <input type="text" id="exName" required placeholder="e.g. Quarterly Exam 2026">
           </div>
           <div class="f-field">
-            <label>Exam Type *</label>
+            <label>Exam Type <span class="required-star">*</span></label>
             <select id="exType" required>
               <option value="" disabled selected>Select exam type</option>
             </select>
@@ -5036,12 +5037,12 @@
         </div>
       </div>
 
-      <label style="font-size:0.8rem; font-weight:600; color:var(--navy); margin:16px 0 8px; display:block;">Selected Student(s) *</label>
+      <label style="font-size:0.8rem; font-weight:600; color:var(--navy); margin:16px 0 8px; display:block;">Selected Student(s) <span class="required-star">*</span></label>
       <div id="discSelectedStudentsBox"></div>
 
       <div class="form-grid" style="margin-top:20px;">
         <div class="f-field">
-          <label>Discount Type *</label>
+          <label>Discount Type <span class="required-star">*</span></label>
           <select id="discCreateType" onchange="onDiscTypeChange()">${DISCOUNT_TYPE_OPTIONS.map(t => `<option>${t}</option>`).join('')}</select>
         </div>
         <div class="f-field full">
@@ -5051,12 +5052,12 @@
         </div>
       </div>
 
-      <label style="font-size:0.8rem; font-weight:600; color:var(--navy); margin:18px 0 8px; display:block;">Student Fees — Apply Discount *</label>
+      <label style="font-size:0.8rem; font-weight:600; color:var(--navy); margin:18px 0 8px; display:block;">Student Fees — Apply Discount <span class="required-star">*</span></label>
       <div id="discStudentFeePanels"></div>
 
       <div class="form-grid" style="margin-top:16px;">
         <div class="f-field full">
-          <label>Select Approver *</label>
+          <label>Select Approver <span class="required-star">*</span></label>
           <select id="discCreateApprover" required>
             <option value="" disabled selected>Select an approver</option>
             ${users.filter(u => (u.role==='Admin' || u.role==='Principal') && u.id!==currentUser.id).map(u => `<option value="${u.id}">${u.name} (${u.role})</option>`).join('')}
@@ -7563,7 +7564,7 @@
       <div class="breadcrumb"><a onclick="backToTemplatesList()">Report Templates</a> &nbsp;/&nbsp; ${t ? t.name : 'New Template'}</div>
       <div class="profile-card" style="max-width:620px;">
         <div class="form-grid">
-          <div class="f-field full"><label>Template Name *</label><input type="text" id="tmplName" value="${t?t.name:''}" placeholder="e.g. Half Yearly Format"></div>
+          <div class="f-field full"><label>Template Name <span class="required-star">*</span></label><input type="text" id="tmplName" value="${t?t.name:''}" placeholder="e.g. Half Yearly Format"></div>
           <div class="f-field full"><label>Title Override <span style="font-weight:400; color:var(--ink-soft);">— leave blank to use "REPORT CARD — [Exam Name]"</span></label><input type="text" id="tmplTitle" value="${t?(t.titleOverride||''):''}" placeholder="e.g. HALF YEARLY PROGRESS REPORT"></div>
         </div>
         <label style="font-size:0.8rem; font-weight:600; color:var(--navy); margin:14px 0 8px; display:block;">Student Info Fields to Show</label>
@@ -7709,8 +7710,8 @@
     body.innerHTML = `
       <div class="breadcrumb"><a onclick="backToExamTemplatesList()">Exam Templates</a> &nbsp;/&nbsp; ${g ? g.name : 'New Template'}</div>
       <div class="profile-card" style="max-width:520px;">
-        <div class="f-field full" style="margin-bottom:14px;"><label>Template Name *</label><input type="text" id="egName" value="${g?g.name:''}" placeholder="e.g. 2 Unit Tests, Summative 1, Annual (All 6 Exams)"></div>
-        <label style="font-size:0.8rem; font-weight:600; color:var(--navy); margin-bottom:8px; display:block;">Exams Included *</label>
+        <div class="f-field full" style="margin-bottom:14px;"><label>Template Name <span class="required-star">*</span></label><input type="text" id="egName" value="${g?g.name:''}" placeholder="e.g. 2 Unit Tests, Summative 1, Annual (All 6 Exams)"></div>
+        <label style="font-size:0.8rem; font-weight:600; color:var(--navy); margin-bottom:8px; display:block;">Exams Included <span class="required-star">*</span></label>
         <div class="disc-checklist" style="max-height:220px; margin-bottom:16px;">
           ${examDefs.length ? examDefs.map(ex => `<label class="disc-check-item"><input type="checkbox" class="eg-exam-check" value="${ex.id}" ${selectedIds.includes(ex.id)?'checked':''}> ${ex.name}</label>`).join('') : `<div style="font-size:0.82rem; color:var(--ink-soft);">No exams created yet — add some under the "Exams" tab first.</div>`}
         </div>
@@ -12123,8 +12124,8 @@
             </select>
           </div>
           <div class="f-field full" id="commsNewTypeField" style="display:none;"><label>New Heading Name</label><input type="text" id="commsNewTypeName" placeholder="e.g. Sports Day Update"></div>
-          <div class="f-field full"><label>Title *</label><input type="text" id="commsTitle" placeholder="e.g. Diwali Holidays Announcement"></div>
-          <div class="f-field full"><label>Message *</label><textarea id="commsBodyText" rows="6" placeholder="Type your message..."></textarea></div>
+          <div class="f-field full"><label>Title <span class="required-star">*</span></label><input type="text" id="commsTitle" placeholder="e.g. Diwali Holidays Announcement"></div>
+          <div class="f-field full"><label>Message <span class="required-star">*</span></label><textarea id="commsBodyText" rows="6" placeholder="Type your message..."></textarea></div>
         </div>
 
         <h4 style="margin-bottom:10px;">Audience</h4>
@@ -12354,8 +12355,8 @@
         <div class="form-grid" style="margin-bottom:10px;">
           <div class="f-field"><label>Type / Heading</label><select id="nbType" onchange="onNbTypeChange()">${noticeTypes.map(t => `<option value="${t.name}">${t.icon} ${t.name}</option>`).join('')}<option value="__new__">+ New Heading...</option></select></div>
           <div class="f-field full" id="nbNewTypeField" style="display:none;"><label>New Heading Name</label><input type="text" id="nbNewTypeName" placeholder="e.g. Sports Day Update"></div>
-          <div class="f-field full"><label>Title *</label><input type="text" id="nbTitle" placeholder="e.g. Diwali Holidays Announcement"></div>
-          <div class="f-field full"><label>Message *</label><textarea id="nbBody" rows="4" placeholder="Type the notice..."></textarea></div>
+          <div class="f-field full"><label>Title <span class="required-star">*</span></label><input type="text" id="nbTitle" placeholder="e.g. Diwali Holidays Announcement"></div>
+          <div class="f-field full"><label>Message <span class="required-star">*</span></label><textarea id="nbBody" rows="4" placeholder="Type the notice..."></textarea></div>
           <div class="f-field">
             <label>Audience</label>
             <select id="nbScope" onchange="nbAudienceScope=this.value; renderNbAudienceFields();">
@@ -13203,16 +13204,16 @@
       <div class="breadcrumb"><a onclick="backToRoomsList()">Rooms</a> &nbsp;/&nbsp; ${r ? r.blockName+' — '+r.roomNumber : 'New Room'}</div>
       <div class="profile-card" style="max-width:520px;">
         <div class="form-grid">
-          <div class="f-field"><label>Block Name *</label><input type="text" id="hsBlockName" value="${r?r.blockName:''}" placeholder="e.g. Boys Block A"></div>
-          <div class="f-field"><label>Room Number *</label><input type="text" id="hsRoomNumber" value="${r?r.roomNumber:''}" placeholder="e.g. 101"></div>
+          <div class="f-field"><label>Block Name <span class="required-star">*</span></label><input type="text" id="hsBlockName" value="${r?r.blockName:''}" placeholder="e.g. Boys Block A"></div>
+          <div class="f-field"><label>Room Number <span class="required-star">*</span></label><input type="text" id="hsRoomNumber" value="${r?r.roomNumber:''}" placeholder="e.g. 101"></div>
           <div class="f-field">
             <label>Room Type</label>
             <select id="hsRoomType">
               ${['2-Seater','4-Seater','6-Seater','Dormitory'].map(t => `<option ${r&&r.roomType===t?'selected':''}>${t}</option>`).join('')}
             </select>
           </div>
-          <div class="f-field"><label>Bed Capacity *</label><input type="number" id="hsCapacity" value="${r?r.capacity:2}" min="1"></div>
-          <div class="f-field"><label>Fee (₹/year) *</label><input type="number" id="hsFee" value="${r?r.fee:''}" min="0"></div>
+          <div class="f-field"><label>Bed Capacity <span class="required-star">*</span></label><input type="number" id="hsCapacity" value="${r?r.capacity:2}" min="1"></div>
+          <div class="f-field"><label>Fee (₹/year) <span class="required-star">*</span></label><input type="number" id="hsFee" value="${r?r.fee:''}" min="0"></div>
           <div class="f-field"><label>Warden Name</label><input type="text" id="hsWardenName" value="${r?r.wardenName||'':''}" placeholder="e.g. Suresh Naidu"></div>
           <div class="f-field"><label>Warden Phone</label><input type="text" id="hsWardenPhone" value="${r?r.wardenPhone||'':''}" placeholder="10-digit mobile" inputmode="numeric" maxlength="10" oninput="this.value=this.value.replace(/\D/g,'').slice(0,10)"></div>
         </div>
@@ -13468,13 +13469,13 @@
       <div class="breadcrumb"><a onclick="backToCatalogList()">Catalog</a> &nbsp;/&nbsp; ${b?b.title:'New Book'}</div>
       <div class="profile-card" style="max-width:520px;">
         <div class="form-grid">
-          <div class="f-field full"><label>Title *</label><input type="text" id="libBookTitle" value="${b?b.title:''}" placeholder="e.g. A Brief History of Time"></div>
-          <div class="f-field"><label>Author *</label><input type="text" id="libBookAuthor" value="${b?b.author:''}" placeholder="e.g. Stephen Hawking"></div>
+          <div class="f-field full"><label>Title <span class="required-star">*</span></label><input type="text" id="libBookTitle" value="${b?b.title:''}" placeholder="e.g. A Brief History of Time"></div>
+          <div class="f-field"><label>Author <span class="required-star">*</span></label><input type="text" id="libBookAuthor" value="${b?b.author:''}" placeholder="e.g. Stephen Hawking"></div>
           <div class="f-field"><label>Category</label><input type="text" id="libBookCategory" value="${b?b.category||'':''}" placeholder="e.g. Science"></div>
           <div class="f-field"><label>ISBN</label><input type="text" id="libBookIsbn" value="${b?b.isbn||'':''}" placeholder="e.g. 978-0553380163"></div>
           <div class="f-field"><label>Publisher</label><input type="text" id="libBookPublisher" value="${b?b.publisher||'':''}" placeholder="e.g. Bantam Books"></div>
           <div class="f-field"><label>Shelf / Location</label><input type="text" id="libBookShelf" value="${b?b.shelfLocation||'':''}" placeholder="e.g. Rack B, Row 3"></div>
-          <div class="f-field"><label>Total Copies *</label><input type="number" id="libBookTotal" value="${b?b.totalCopies:1}" min="1"></div>
+          <div class="f-field"><label>Total Copies <span class="required-star">*</span></label><input type="number" id="libBookTotal" value="${b?b.totalCopies:1}" min="1"></div>
         </div>
         <div style="display:flex; gap:10px; margin-top:16px;">
           <button class="btn btn-ghost" onclick="backToCatalogList()">Cancel</button>
@@ -13813,7 +13814,7 @@
       <div class="breadcrumb"><a onclick="backToRoutesList()">Routes</a> &nbsp;/&nbsp; ${r ? r.name : 'New Route'}</div>
       <div class="profile-card" style="max-width:640px;">
         <div class="form-grid" style="margin-bottom:16px;">
-          <div class="f-field full"><label>Route Name *</label><input type="text" id="trRouteName" value="${trEditName}" placeholder="e.g. Route 1 — Main Market Stop"></div>
+          <div class="f-field full"><label>Route Name <span class="required-star">*</span></label><input type="text" id="trRouteName" value="${trEditName}" placeholder="e.g. Route 1 — Main Market Stop"></div>
           <div class="f-field"><label>Bus Number</label><input type="text" id="trBusNumber" value="${trEditBusNumber}" placeholder="e.g. AP 03 TZ 4521"></div>
           <div class="f-field"><label>Driver Name</label><input type="text" id="trDriverName" value="${trEditDriverName}" placeholder="e.g. Ramesh Kumar"></div>
           <div class="f-field"><label>Driver Phone</label><input type="text" id="trDriverPhone" value="${trEditDriverPhone}" placeholder="10-digit mobile" inputmode="numeric" maxlength="10" oninput="this.value=this.value.replace(/\D/g,'').slice(0,10)"></div>
@@ -14733,15 +14734,15 @@
       <div class="profile-card" style="max-width:520px;">
         ${!isAdmin ? `<div style="background:rgba(203,154,46,0.12); border-left:4px solid var(--gold); border-radius:8px; padding:12px 14px; margin-bottom:16px; font-size:0.82rem;"><b>⚠ Stock changes need Admin approval.</b> Saving this will be sent for review before it takes effect.</div>` : ''}
         <div class="form-grid">
-          <div class="f-field full"><label>Product Name *</label><input type="text" id="invItemName" value="${it?it.name:''}" placeholder="e.g. School Uniform — Size M"></div>
-          <div class="f-field"><label>Type *</label><select id="invItemType"><option value="Sellable" ${(!it||it.type==='Sellable')?'selected':''}>Sellable</option><option value="Non-Sellable" ${it&&it.type==='Non-Sellable'?'selected':''}>Non-Sellable</option></select></div>
+          <div class="f-field full"><label>Product Name <span class="required-star">*</span></label><input type="text" id="invItemName" value="${it?it.name:''}" placeholder="e.g. School Uniform — Size M"></div>
+          <div class="f-field"><label>Type <span class="required-star">*</span></label><select id="invItemType"><option value="Sellable" ${(!it||it.type==='Sellable')?'selected':''}>Sellable</option><option value="Non-Sellable" ${it&&it.type==='Non-Sellable'?'selected':''}>Non-Sellable</option></select></div>
           <div class="f-field"><label>Category</label><select id="invItemCategory">${INVENTORY_CATEGORIES.map(c => `<option ${it&&it.category===c?'selected':''}>${c}</option>`).join('')}</select></div>
-          <div class="f-field"><label>Quantity in Stock *</label><input type="number" id="invItemQty" value="${it?it.quantity:0}" min="0"></div>
+          <div class="f-field"><label>Quantity in Stock <span class="required-star">*</span></label><input type="number" id="invItemQty" value="${it?it.quantity:0}" min="0"></div>
           <div class="f-field"><label>Stock Threshold</label><input type="number" id="invItemThreshold" value="${it?it.threshold:5}" min="0"></div>
-          <div class="f-field"><label>Cost Price (₹) *</label><input type="number" id="invItemCost" value="${it?it.costPrice:''}" min="0"></div>
-          <div class="f-field"><label>Selling Price (₹) *</label><input type="number" id="invItemSelling" value="${it?it.sellingPrice:''}" min="0"></div>
+          <div class="f-field"><label>Cost Price (₹) <span class="required-star">*</span></label><input type="number" id="invItemCost" value="${it?it.costPrice:''}" min="0"></div>
+          <div class="f-field"><label>Selling Price (₹) <span class="required-star">*</span></label><input type="number" id="invItemSelling" value="${it?it.sellingPrice:''}" min="0"></div>
         </div>
-        ${!isAdmin ? `<div class="f-field full" style="margin-top:10px;"><label>Explanation for Admin *</label><textarea id="invItemExplanation" rows="2" placeholder="Why is this stock change needed?"></textarea></div>` : ''}
+        ${!isAdmin ? `<div class="f-field full" style="margin-top:10px;"><label>Explanation for Admin <span class="required-star">*</span></label><textarea id="invItemExplanation" rows="2" placeholder="Why is this stock change needed?"></textarea></div>` : ''}
         <div style="display:flex; gap:10px; margin-top:16px;">
           <button class="btn btn-ghost" onclick="backToInventoryItemsList()">Cancel</button>
           <button class="btn btn-primary" onclick="saveInventoryItem()">${isAdmin ? 'Save Product' : 'Submit for Approval'}</button>
@@ -15814,7 +15815,7 @@
       <div class="profile-card" style="margin-bottom:20px;">
         <h4>Basic Information</h4>
         <div class="form-grid" style="margin-top:12px;">
-          <div class="f-field full"><label>School Name *</label><input type="text" id="siName" value="${schoolInfo.name||''}"></div>
+          <div class="f-field full"><label>School Name <span class="required-star">*</span></label><input type="text" id="siName" value="${schoolInfo.name||''}"></div>
           <div class="f-field"><label>UDISE Code</label><input type="text" id="siUdise" value="${schoolInfo.udise||''}" inputmode="numeric" maxlength="11" oninput="this.value=this.value.replace(/\\D/g,'').slice(0,11)"></div>
           <div class="f-field"><label>School Code</label><input type="text" id="siSchoolCode" value="${schoolInfo.schoolCode||''}"></div>
           <div class="f-field full"><label>Reg. / Affiliation Number</label><input type="text" id="siRegNumber" value="${schoolInfo.regNumber||''}"></div>
@@ -16389,7 +16390,7 @@
       <div class="profile-card" style="max-width:640px; margin-bottom:16px; border-left:4px solid var(--gold);">
         <h4>⚠ Admin Approval Required</h4>
         <p style="font-size:0.8rem; color:var(--ink-soft); margin:6px 0 10px;">Your role can't apply this directly — it will be sent to Admin for approval. Explain why this change is needed.</p>
-        <div class="f-field full"><label>Explanation *</label><textarea id="ptExplanation" rows="2" placeholder="e.g. Exceptional performance in all subjects, recommended by class teacher"></textarea></div>
+        <div class="f-field full"><label>Explanation <span class="required-star">*</span></label><textarea id="ptExplanation" rows="2" placeholder="e.g. Exceptional performance in all subjects, recommended by class teacher"></textarea></div>
       </div>
     ` : '';
     if(promoTransferTab === 'promote'){
@@ -17264,7 +17265,7 @@
       <div class="profile-card" style="margin-bottom:20px;">
         <div class="form-grid">
           <div class="f-field full"><label>Send to</label><select id="concernRecipientSel">${recipientOptionsHtml}</select></div>
-          <div class="f-field full"><label>Your message *</label><textarea id="concernMessageInput" rows="4" placeholder="Describe your concern..."></textarea></div>
+          <div class="f-field full"><label>Your message <span class="required-star">*</span></label><textarea id="concernMessageInput" rows="4" placeholder="Describe your concern..."></textarea></div>
         </div>
         <button class="btn btn-primary btn-sm" style="margin-top:10px;" onclick="submitConcern()">Send</button>
       </div>
@@ -17275,7 +17276,7 @@
         <div class="form-grid">
           <div class="f-field full"><label>Send to</label><select id="submissionRecipientSel">${recipientOptionsHtml}</select></div>
           ${homeworkOptionsHtml ? `<div class="f-field full"><label>Which homework is this for? (optional)</label><select id="submissionHomeworkSel"><option value="">Not listed / holiday work</option>${homeworkOptionsHtml}</select></div>` : ''}
-          <div class="f-field full"><label>Title *</label><input type="text" id="submissionTitleInput" placeholder="e.g. Maths worksheet, Holiday project"></div>
+          <div class="f-field full"><label>Title <span class="required-star">*</span></label><input type="text" id="submissionTitleInput" placeholder="e.g. Maths worksheet, Holiday project"></div>
           <div class="f-field full"><label>Notes</label><textarea id="submissionDescInput" rows="3" placeholder="Anything you'd like to add..."></textarea></div>
           <div class="f-field full">
             <label>Attach photos, PDFs, Word or Excel files (optional — up to 5 files, 12MB combined)</label>
@@ -17892,7 +17893,11 @@
     document.getElementById('moreActionsMenu').classList.remove('open');
   }
 
-  const IMPORT_TEMPLATE_HEADERS = ['Admission No','First Name','Last Name','Class','Section','Gender','Date of Birth','Email','Date of Joining','Blood Group','Caste Category','Religion','Father Name','Father Phone','Mother Name','Mother Phone','Address','Needs Transport','Status'];
+  // Columns marked with " *" below are mandatory for every row — matches the same
+  // four fields required on the manual "Add Student" form (First Name, Last Name,
+  // Class, Section). A row missing any of these is skipped during import, not
+  // silently guessed at — see importExcel().
+  const IMPORT_TEMPLATE_HEADERS = ['Admission No','First Name *','Last Name *','Class *','Section *','Gender','Date of Birth','Email','Date of Joining','Blood Group','Caste Category','Religion','Father Name','Father Phone','Mother Name','Mother Phone','Address','Needs Transport','Status'];
 
   async function ensureXLSX(){
     if(typeof XLSX !== 'undefined') return true;
@@ -17958,13 +17963,14 @@
       newRow,
       updateRow,
       [],
+      ['* = required. A row missing First Name, Last Name, Class or Section will be skipped when you import — it will NOT be added or updated.'],
       ['Tip: leave "Admission No" blank to admit a brand-new student. To UPDATE an existing student instead, put their exact Admission No in that column — matching rows will be updated, not duplicated.'],
     ]);
     ws['!cols'] = IMPORT_TEMPLATE_HEADERS.map(h => ({ wch: Math.max(14, h.length+2) }));
     const wb = XLSX.utils.book_new();
     XLSX.utils.book_append_sheet(wb, ws, 'Students');
     XLSX.writeFile(wb, `${slugifySchoolName()}_student_import_template.xlsx`);
-    showToast('Template downloaded — fill it in and use "Import Students (Excel)".');
+    showToast('Template downloaded — First Name, Last Name, Class and Section are required for every row (marked * in the sheet). Fill it in and use "Import Students (Excel)".');
     document.getElementById('moreActionsMenu').classList.remove('open');
   }
 
@@ -18049,25 +18055,50 @@
         const out = {};
         Object.keys(obj).forEach(k => {
           const val = obj[k];
-          out[k.trim().toLowerCase()] = (val instanceof Date) ? val : (val !== undefined && val !== null ? String(val).trim() : '');
+          // Strip a trailing " *" (our own template marks required columns this way,
+          // e.g. "First Name *") so a re-uploaded, unmodified template still matches.
+          const cleanKey = k.trim().replace(/\s*\*+\s*$/, '').toLowerCase();
+          out[cleanKey] = (val instanceof Date) ? val : (val !== undefined && val !== null ? String(val).trim() : '');
         });
         return out;
       };
 
+      // Mandatory columns for bulk import — kept in lockstep with the manual "Add
+      // Student" form's required fields (First Name, Last Name, Class, Section).
+      // A row missing any of these is skipped and counted, never silently guessed
+      // at (previously a blank Class/Section was silently defaulted, which could
+      // misfile a real student into the wrong class without any warning).
       let added = 0, updated = 0, skipped = 0, autoMatchedCount = 0;
+      const skipReasons = { firstName: 0, lastName: 0, class: 0, section: 0 };
       rows.forEach((row, i) => {
         const rec = norm(row);
         const firstName = rec['first name'] || rec['firstname'];
-        if(!firstName){ skipped++; return; }
+        const lastNameVal = rec['last name'] || rec['lastname'] || '';
+        const classRaw = (rec['class']||'').toString().trim();
+        const sectionRaw = (rec['section']||'').toString().trim();
+
+        const missing = [];
+        if(!firstName) missing.push('firstName');
+        if(!lastNameVal) missing.push('lastName');
+        if(!classRaw) missing.push('class');
+        if(!sectionRaw) missing.push('section');
+        if(missing.length){
+          skipped++;
+          missing.forEach(m => skipReasons[m]++);
+          return;
+        }
 
         const admissionNoRaw = (rec['admission no'] || rec['admissionno'] || '').toString().trim();
         const fields = {
-          firstName, lastName: rec['last name'] || rec['lastname'] || '',
-          name: firstName + ' ' + (rec['last name'] || rec['lastname'] || ''),
-          className: normalizeClassName(rec['class']),
+          firstName, lastName: lastNameVal,
+          name: firstName + ' ' + lastNameVal,
+          className: normalizeClassName(classRaw),
           section: (() => {
-            const raw = (rec['section']||'').toString().trim().toUpperCase();
-            return SECTIONS.find(s => s.toUpperCase() === raw) || SECTIONS[0];
+            const raw = sectionRaw.toUpperCase();
+            // Keep the value as typed if it doesn't match a known section, rather
+            // than silently defaulting to the first section (same philosophy as
+            // normalizeClassName for an unrecognized class).
+            return SECTIONS.find(s => s.toUpperCase() === raw) || raw;
           })(),
           gender: rec['gender'] || '',
           dob: toDateStr(rec['date of birth'] || rec['dob']),
@@ -18107,7 +18138,14 @@
       renderAdmissionsBody();
       let msg = added + ' added, ' + updated + ' updated.';
       if(autoMatchedCount) msg += ' (' + autoMatchedCount + ' matched to an existing student by name/class instead of duplicating.)';
-      if(skipped) msg += ' ' + skipped + ' row(s) skipped (missing First Name).';
+      if(skipped){
+        const reasonParts = [];
+        if(skipReasons.firstName) reasonParts.push(skipReasons.firstName + ' missing First Name');
+        if(skipReasons.lastName) reasonParts.push(skipReasons.lastName + ' missing Last Name');
+        if(skipReasons.class) reasonParts.push(skipReasons.class + ' missing Class');
+        if(skipReasons.section) reasonParts.push(skipReasons.section + ' missing Section');
+        msg += ' ' + skipped + ' row(s) skipped — ' + reasonParts.join('; ') + '. (First Name, Last Name, Class and Section are required for every row.)';
+      }
       showToast(msg);
       e.target.value = '';
      }catch(outerErr){
