@@ -216,6 +216,12 @@ async function ensureSchema() {
     conduct TEXT, purpose TEXT, academic_year TEXT,
     issued_by TEXT, issued_by_name TEXT, issued_at TIMESTAMPTZ NOT NULL DEFAULT now()
   )`;
+  // details: a free-form JSONB bag for fields specific to newer certificate
+  // types (Transfer's date-of-leaving/reason/promotion/working-days/dues,
+  // Character's remarks, Migration's destination board, etc.) — added this
+  // way rather than a dedicated column per field so a future certificate
+  // type never needs its own migration.
+  await sql`ALTER TABLE certificates_issued ADD COLUMN IF NOT EXISTS details JSONB NOT NULL DEFAULT '{}'::jsonb`;
   await sql`CREATE INDEX IF NOT EXISTS idx_certificates_issued_record ON certificates_issued (resource, record_id)`;
   // Recycle-bin retention: a soft-deleted row (students/users — see
   // PURGEABLE_RESOURCES below) doesn't sit in Recently Deleted forever.
@@ -1671,7 +1677,7 @@ async function handleDeletionRequests(req, res) {
   return res.status(405).json({ error: 'Method not allowed.' });
 }
 
-// ---------- Certificate register (Study / Transfer / Bonafide certificates) ----------
+// ---------- Certificate register (Study/Bonafide, Transfer, Character, Migration) ----------
 // Every certificate issued for a student is logged here with a snapshot of
 // their details at the moment of issue (so a later correction to the live
 // record never rewrites what an already-printed certificate said) and a
@@ -1691,6 +1697,14 @@ const CERTIFICATE_TARGETS = {
         className: row.class_name || '', section: row.section || '', status: row.status || '',
         fatherName: extra.fatherName || '', motherName: extra.motherName || '',
         dob: extra.dob || '', admDate: extra.admDate || '', gender: extra.gender || '',
+        // Added for Transfer/Character/Migration certificates, which
+        // (unlike the original Study Certificate) conventionally include
+        // these per CBSE/state TC-format norms. Aadhaar is deliberately
+        // left out of every certificate snapshot — a printed/handed-out
+        // document is the wrong place for it.
+        caste: extra.caste || '', category: extra.category || '', religion: extra.religion || '',
+        nationality: extra.nationality || '',
+        fatherPhone: extra.fatherPhone || '', motherPhone: extra.motherPhone || '',
       };
     },
   },
@@ -1699,6 +1713,7 @@ function shapeCertificate(r) {
   return {
     id: r.id, type: r.type, serialNo: r.serial_no, resource: r.resource, recordId: r.record_id,
     snapshot: r.snapshot || {}, conduct: r.conduct, purpose: r.purpose, academicYear: r.academic_year,
+    details: r.details || {},
     issuedBy: r.issued_by, issuedByName: r.issued_by_name, issuedAt: r.issued_at,
   };
 }
@@ -1706,7 +1721,8 @@ async function nextCertificateSerial(type) {
   const year = new Date().getFullYear();
   const rows = await sql`SELECT COUNT(*)::int AS n FROM certificates_issued WHERE type = ${type} AND EXTRACT(YEAR FROM issued_at) = ${year}`;
   const seq = (rows[0] && rows[0].n ? rows[0].n : 0) + 1;
-  const prefix = type === 'Transfer' ? 'TC' : type === 'Bonafide' ? 'BC' : 'SC';
+  const prefix = type === 'Transfer' ? 'TC' : type === 'Bonafide' ? 'BC'
+    : type === 'Character' ? 'CC' : type === 'Migration' ? 'MC' : 'SC';
   return `${prefix}/${year}/${String(seq).padStart(4, '0')}`;
 }
 async function handleCertificates(req, res) {
@@ -1719,7 +1735,7 @@ async function handleCertificates(req, res) {
     return res.status(200).json(rows.map(shapeCertificate));
   }
   if (req.method === 'POST') {
-    const { type, resource: targetResource, recordId, conduct, purpose, academicYear } = req.body || {};
+    const { type, resource: targetResource, recordId, conduct, purpose, academicYear, details } = req.body || {};
     const target = CERTIFICATE_TARGETS[targetResource];
     if (!target) return res.status(400).json({ error: 'Unsupported record type for a certificate.' });
     if (!recordId) return res.status(400).json({ error: 'Missing recordId.' });
@@ -1733,11 +1749,18 @@ async function handleCertificates(req, res) {
     const id = 'cert_' + Date.now() + '_' + crypto.randomBytes(4).toString('hex');
     const serialNo = await nextCertificateSerial(certType);
     const snapshot = target.buildSnapshot(row);
+    // `details` is a free-form bag for fields specific to the certificate
+    // type (Transfer: dateOfLeaving/reasonForLeaving/qualifiedForPromotion/
+    // workingDays/daysPresent/feesPaidUpTo/duesStatus/remarks; Character:
+    // remarks; Migration: eligibleForClass/destinationBoard) — validated
+    // only as "is it an object", since new fields shouldn't need a server
+    // change to start being recorded.
+    const detailsObj = (details && typeof details === 'object' && !Array.isArray(details)) ? details : {};
     await sql`
-      INSERT INTO certificates_issued (id, type, serial_no, resource, record_id, snapshot, conduct, purpose, academic_year, issued_by, issued_by_name)
-      VALUES (${id}, ${certType}, ${serialNo}, ${targetResource}, ${String(recordId)}, ${JSON.stringify(snapshot)}::jsonb, ${conduct ? String(conduct).trim() : null}, ${purpose ? String(purpose).trim() : null}, ${academicYear ? String(academicYear).trim() : null}, ${req.authUser.id}, ${req.authUser.name})
+      INSERT INTO certificates_issued (id, type, serial_no, resource, record_id, snapshot, conduct, purpose, academic_year, details, issued_by, issued_by_name)
+      VALUES (${id}, ${certType}, ${serialNo}, ${targetResource}, ${String(recordId)}, ${JSON.stringify(snapshot)}::jsonb, ${conduct ? String(conduct).trim() : null}, ${purpose ? String(purpose).trim() : null}, ${academicYear ? String(academicYear).trim() : null}, ${JSON.stringify(detailsObj)}::jsonb, ${req.authUser.id}, ${req.authUser.name})
     `;
-    return res.status(201).json({ ok: true, id, serialNo, snapshot });
+    return res.status(201).json({ ok: true, id, serialNo, snapshot, details: detailsObj });
   }
   return res.status(405).json({ error: 'Method not allowed.' });
 }
