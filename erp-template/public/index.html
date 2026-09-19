@@ -1136,8 +1136,7 @@
           <div class="dropdown-menu" id="moreActionsMenu">
             <button type="button" onclick="downloadIdCards()">Download ID Cards</button>
             <button type="button" onclick="showGroupsClubs()">Groups &amp; Clubs</button>
-            <button type="button" onclick="downloadImportTemplate()" title="Required columns for every row: First Name, Last Name, Class, Section">Download Import Template (Excel)</button>
-            <button type="button" id="btnImportStudents" onclick="document.getElementById('importFileInput').click()" title="Required columns for every row: First Name, Last Name, Class, Section">Import Students (Excel)</button>
+            <button type="button" id="btnImportStudents" onclick="openImportWizard('students')" title="Guided 4-step import: map your sheet's columns, preview every row's validation result, then commit">Bulk Import Students (Excel)</button>
             <button type="button" id="btnExportStudentsExcel" onclick="exportExcel()">Export Students (Excel)</button>
             <button type="button" id="btnExportStudentsPDF" onclick="exportStudentsPDF()">Export Students (PDF)</button>
             <button type="button" onclick="openStudyCertPicker()">Bonafide / Study Certificate</button>
@@ -1149,7 +1148,6 @@
             <button type="button" onclick="openDeletionRequestsModal()">Pending Deletion Requests</button>
           </div>
         </div>
-        <input type="file" id="importFileInput" accept=".xlsx,.xls,.csv" style="display:none;" onchange="importExcel(event)">
         <button class="btn btn-primary" id="btnAddStudent" onclick="openWizard()">+ Add Student</button>
       </div>
     </div>
@@ -1341,6 +1339,7 @@
             <option value="Active">Active</option><option value="Inactive">Inactive</option><option value="all">All</option>
           </select>
         </div>
+        <button class="btn btn-ghost" id="btnImportStaff" onclick="openImportWizard('staff')" title="Guided 4-step import: map your sheet's columns, preview every row's validation result, then commit">Bulk Import (Excel)</button>
         <button class="btn btn-primary" id="btnAddStaff" onclick="openStaffWizard()">+ Add Staff</button>
       </div>
 
@@ -2297,6 +2296,25 @@
         <button type="button" class="btn btn-ghost" onclick="closeStudyCertModal()">Cancel</button>
         <button type="button" class="btn btn-primary" onclick="submitStudyCertificate()">Generate &amp; Print</button>
       </div>
+    </div>
+  </div>
+</div>
+
+<!-- Bulk Import Wizard (Students & Staff) — a 4-step guided import modeled on
+     how top school ERPs / the UDISE+ government portal handle first-time
+     bulk data dumping: download a template, upload it, match your sheet's
+     own columns to our fields (so an existing school register works even
+     with different headers), preview every row's validation result with a
+     downloadable error report, then an explicit commit that only writes
+     the valid rows. See openImportWizard() / IMPORT_FIELD_DEFS below. -->
+<div class="modal-overlay" id="importWizardOverlay">
+  <div class="modal" style="max-width:1040px;">
+    <div class="modal-inner">
+      <button class="modal-close" onclick="closeImportWizard()">&times;</button>
+      <h2 id="importWizardTitle">Bulk Import</h2>
+      <p class="modal-sub" id="importWizardSub"></p>
+      <div id="importWizardSteps" style="display:flex; gap:8px; margin:-10px 0 20px;"></div>
+      <div id="importWizardBody"></div>
     </div>
   </div>
 </div>
@@ -3500,6 +3518,7 @@
     setBtn('btnExportStudentsExcel', canDo('admissions','print'));
     setBtn('btnExportStudentsPDF', canDo('admissions','print'));
     setBtn('btnAddStaff', canDo('staff','create'));
+    setBtn('btnImportStaff', canDo('staff','create'));
   }
   function updateSidebarAvatar(){
     const el = document.getElementById('sbUserAvatar');
@@ -17910,12 +17929,6 @@
     document.getElementById('moreActionsMenu').classList.remove('open');
   }
 
-  // Columns marked with " *" below are mandatory for every row — matches the same
-  // four fields required on the manual "Add Student" form (First Name, Last Name,
-  // Class, Section). A row missing any of these is skipped during import, not
-  // silently guessed at — see importExcel().
-  const IMPORT_TEMPLATE_HEADERS = ['Admission No','First Name *','Last Name *','Class *','Section *','Gender','Date of Birth','Email','Date of Joining','Blood Group','Caste Category','Religion','Father Name','Father Phone','Mother Name','Mother Phone','Address','Needs Transport','Status'];
-
   async function ensureXLSX(){
     if(typeof XLSX !== 'undefined') return true;
     showToast('Loading Excel support...');
@@ -17971,25 +17984,6 @@
     return `<button class="btn btn-ghost btn-sm" onclick="${excelFn}">📥 Excel</button> <button class="btn btn-ghost btn-sm" onclick="${pdfFn}">📄 PDF</button>`;
   }
 
-  async function downloadImportTemplate(){
-    if(!(await ensureXLSX())) return;
-    const newRow = ['','Priya','Kumar','5th Class','A','Female','2015-06-12','priya@example.com','2026-06-01','B+','OC','Hindu','K. Ramesh','9876543210','K. Sita','9876500000','Main Bus Stand','No','Active'];
-    const updateRow = ['2026-001','Arjun','Rao','6th Class','A','Male','2014-03-20','arjun@example.com','2025-06-01','O+','BC-A','Hindu','K. Suresh','9876500001','K. Latha','9876500002','Main Bus Stand','Yes','Active'];
-    const ws = XLSX.utils.aoa_to_sheet([
-      IMPORT_TEMPLATE_HEADERS,
-      newRow,
-      updateRow,
-      [],
-      ['* = required. A row missing First Name, Last Name, Class or Section will be skipped when you import — it will NOT be added or updated.'],
-      ['Tip: leave "Admission No" blank to admit a brand-new student. To UPDATE an existing student instead, put their exact Admission No in that column — matching rows will be updated, not duplicated.'],
-    ]);
-    ws['!cols'] = IMPORT_TEMPLATE_HEADERS.map(h => ({ wch: Math.max(14, h.length+2) }));
-    const wb = XLSX.utils.book_new();
-    XLSX.utils.book_append_sheet(wb, ws, 'Students');
-    XLSX.writeFile(wb, `${slugifySchoolName()}_student_import_template.xlsx`);
-    showToast('Template downloaded — First Name, Last Name, Class and Section are required for every row (marked * in the sheet). Fill it in and use "Import Students (Excel)".');
-    document.getElementById('moreActionsMenu').classList.remove('open');
-  }
 
   async function exportExcel(){
     if(!(await ensureXLSX())) return;
@@ -18045,137 +18039,512 @@
     document.getElementById('moreActionsMenu').classList.remove('open');
   }
 
-  async function importExcel(e){
+  // ============================================================================
+  // Bulk Import Wizard (Students & Staff) — first-time data dumping
+  // ----------------------------------------------------------------------------
+  // Modeled on how UDISE+ (the government school-data portal every Indian
+  // school already deals with) and modern school-ERP onboarding flows handle
+  // bulk data: (1) download a template or bring your own existing register,
+  // (2) match your sheet's own column headers to our fields — so a school's
+  // real Excel register works even when its headers/order don't match ours,
+  // (3) preview every single row's validation result — new/update/warning/
+  // error counts, a scrollable table, and a downloadable Issues Report —
+  // before ANYTHING is written, then (4) an explicit commit that writes only
+  // the rows without a blocking error.
+  //
+  // Updating an EXISTING record uses patch semantics: a blank cell in the
+  // sheet never clears/overwrites an existing value — only a column that
+  // actually had a value in that row changes anything. That's what makes a
+  // "just add everyone's phone numbers" re-upload (every other column left
+  // blank) safe to run without wiping out unrelated data.
+  // ============================================================================
+
+  function importValidateDate(v){
+    if(!v) return { value:'' };
+    let m = v.match(/^(\d{4})-(\d{2})-(\d{2})$/);
+    if(m) return { value: v };
+    m = v.match(/^(\d{1,2})[\/\-](\d{1,2})[\/\-](\d{4})$/);
+    if(m){
+      const [, d, mo, y] = m;
+      return { value: `${y}-${mo.padStart(2,'0')}-${d.padStart(2,'0')}` };
+    }
+    return { value: v, warning: `"${v}" doesn't look like a date (expected YYYY-MM-DD or DD/MM/YYYY) — saved as typed.` };
+  }
+  function importValidateEmail(v, required){
+    if(!v) return { value:'' };
+    if(/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(v)) return { value:v };
+    return required ? { value:v, error:`"${v}" isn't a valid email address.` } : { value:v, warning:`"${v}" doesn't look like a valid email address — saved as typed.` };
+  }
+  function importValidatePhone(v, required){
+    if(!v) return { value:'' };
+    const digits = v.replace(/\D/g,'');
+    if(digits.length === 10) return { value: digits };
+    return required ? { value:v, error:`"${v}" isn't a valid 10-digit phone number.` } : { value:v, warning:`"${v}" doesn't look like a valid 10-digit phone number — saved as typed.` };
+  }
+  function importValidateAadhar(v){
+    if(!v) return { value:'' };
+    const digits = v.replace(/\D/g,'');
+    if(digits.length === 12) return { value: digits };
+    return { value:v, warning:`"${v}" isn't a valid 12-digit Aadhaar number — saved as typed.` };
+  }
+  function importValidateGender(v){
+    if(!v) return { value:'' };
+    const g = v.toLowerCase();
+    if(g.startsWith('m')) return { value:'Male' };
+    if(g.startsWith('f')) return { value:'Female' };
+    return { value:v, warning:`Gender "${v}" wasn't recognized (expected Male/Female/Other) — saved as typed.` };
+  }
+  function runImportFieldValidate(f, raw){
+    const v = raw === undefined || raw === null ? '' : String(raw).trim();
+    if(f.validate) return f.validate(v);
+    if(f.type === 'date') return importValidateDate(v);
+    if(f.type === 'email') return importValidateEmail(v, f.required);
+    if(f.type === 'phone') return importValidatePhone(v, f.required);
+    if(f.type === 'aadhar') return importValidateAadhar(v);
+    return { value: v };
+  }
+
+  const IMPORT_FIELD_DEFS = {
+    students: {
+      label: 'Students',
+      matchKey: 'admissionNo',
+      matchKeyLabel: 'Admission No',
+      listRef: () => students,
+      newRecordDefaults: () => ({ id: 'stu_' + Date.now() + '_' + Math.random().toString(36).slice(2,7) }),
+      newIdValue: () => nextAdmissionNo(),
+      deriveFields: rec => {
+        rec.name = (rec.firstName||'') + ' ' + (rec.lastName||'');
+        rec.parent = rec.fatherName || rec.motherName || '';
+        rec.contact = rec.fatherPhone || rec.motherPhone || '';
+      },
+      findExisting: (matchVal, rec) => matchVal
+        ? students.find(s => (s.admissionNo||'').toLowerCase() === matchVal.toLowerCase())
+        : findPossibleDuplicate(rec.firstName, rec.lastName, rec.className, rec.section, null),
+      afterCommit: async () => { await persist(); renderDashboard(); renderAdmissionsBody(); },
+      sampleRows: [
+        ['','Priya','Kumar','5th Class','A','Female','2015-06-12','priya@example.com','2026-06-01','B+','OC','Hindu','K. Ramesh','9876543210','K. Sita','9876500000','Main Bus Stand','No','Active'],
+        ['2026-001','Arjun','Rao','6th Class','A','Male','2014-03-20','arjun@example.com','2025-06-01','O+','BC-A','Hindu','K. Suresh','9876500001','K. Latha','9876500002','Main Bus Stand','Yes','Active'],
+      ],
+      fields: [
+        { key:'admissionNo', label:'Admission No', isMatchKey:true, aliases:['admission no','admissionno','adm no'] },
+        { key:'firstName', label:'First Name', required:true, aliases:['first name','firstname','fname'] },
+        { key:'lastName', label:'Last Name', required:true, aliases:['last name','lastname','lname','surname'] },
+        { key:'className', label:'Class', required:true, aliases:['class','classname','grade','std'],
+          validate: v => {
+            const norm = normalizeClassName(v);
+            const known = CLASS_LEVELS.some(c => c.toLowerCase() === norm.toLowerCase());
+            return { value: norm, warning: known ? null : `Class "${v}" isn't one of your configured classes — will be saved as typed.` };
+          } },
+        { key:'section', label:'Section', required:true, aliases:['section','sec'],
+          validate: v => {
+            const raw = v.toUpperCase();
+            const known = SECTIONS.find(s => s.toUpperCase() === raw);
+            return { value: known || raw, warning: known ? null : `Section "${v}" isn't one of your configured sections (${SECTIONS.join(', ')}) — will be saved as typed.` };
+          } },
+        { key:'gender', label:'Gender', aliases:['gender','sex'], validate: importValidateGender },
+        { key:'dob', label:'Date of Birth', aliases:['date of birth','dob'], type:'date' },
+        { key:'email', label:'Email', aliases:['email','email address'], type:'email' },
+        { key:'admDate', label:'Date of Joining', aliases:['date of joining','admission date','doj'], type:'date' },
+        { key:'blood', label:'Blood Group', aliases:['blood group','blood'] },
+        { key:'caste', label:'Caste Category', aliases:['caste category','caste','category'] },
+        { key:'religion', label:'Religion', aliases:['religion'] },
+        { key:'fatherName', label:'Father Name', aliases:['father name'] },
+        { key:'fatherPhone', label:'Father Phone', aliases:['father phone'], type:'phone' },
+        { key:'motherName', label:'Mother Name', aliases:['mother name'] },
+        { key:'motherPhone', label:'Mother Phone', aliases:['mother phone'], type:'phone' },
+        { key:'fatherAddress', label:'Address', aliases:['address'] },
+        { key:'needsTransport', label:'Needs Transport', aliases:['needs transport','transport'], defaultWhenBlank:'No',
+          validate: v => ({ value: /^y/i.test(v) ? 'Yes' : 'No' }) },
+        { key:'status', label:'Status', aliases:['status'], defaultWhenBlank:'Active' },
+      ],
+    },
+    staff: {
+      label: 'Staff',
+      matchKey: 'staffId',
+      matchKeyLabel: 'Staff ID',
+      listRef: () => staffList,
+      newRecordDefaults: () => ({ id: 'stf_' + Date.now() + '_' + Math.random().toString(36).slice(2,7) }),
+      newIdValue: () => nextStaffId(),
+      findExisting: (matchVal, rec) => matchVal
+        ? staffList.find(s => (s.staffId||'').toLowerCase() === matchVal.toLowerCase())
+        : staffList.find(s => (s.firstName||'').toLowerCase()===(rec.firstName||'').toLowerCase()
+            && (s.lastName||'').toLowerCase()===(rec.lastName||'').toLowerCase()
+            && (s.phone||'')===(rec.phone||'') && rec.phone),
+      afterCommit: async () => { await storageSet(STAFF_KEY, staffList); renderStaffBody(); },
+      sampleRows: [
+        ['','Lakshmi','Kumari','Female','1990-04-15','Teaching','Teacher','2026-06-01','9876543210','lakshmi.k@example.com','12-3, Main Road, Town','B+','','M.Sc, B.Ed','5','25000','Active'],
+        ['STF2026-003','Ramesh','Babu','Male','1985-01-10','Administration','Office Assistant','2020-06-01','9876500003','ramesh.b@example.com','5-6, Market Street','O+','123456789012','B.Com','8','18000','Active'],
+      ],
+      fields: [
+        { key:'staffId', label:'Staff ID', isMatchKey:true, aliases:['staff id','staffid','employee id'] },
+        { key:'firstName', label:'First Name', required:true, aliases:['first name','firstname'] },
+        { key:'lastName', label:'Last Name', required:true, aliases:['last name','lastname'] },
+        { key:'gender', label:'Gender', required:true, aliases:['gender','sex'], validate: v => {
+            const r = importValidateGender(v);
+            return r.value ? r : { value:v, error:`Gender "${v}" wasn't recognized (expected Male/Female/Other).` };
+          } },
+        { key:'dob', label:'Date of Birth', required:true, aliases:['date of birth','dob'], type:'date' },
+        { key:'department', label:'Department', required:true, aliases:['department','dept'],
+          validate: v => ({ value:v, warning: staffDepartments.includes(v) ? null : `"${v}" isn't in your configured Departments list yet — will still be saved (add it under Departments & Designations for consistent filtering).` }) },
+        { key:'designation', label:'Designation', required:true, aliases:['designation','role','job title'],
+          validate: v => ({ value:v, warning: staffDesignations.includes(v) ? null : `"${v}" isn't in your configured Designations list yet — will still be saved.` }) },
+        { key:'doj', label:'Date of Joining', required:true, aliases:['date of joining','doj'], type:'date' },
+        { key:'phone', label:'Phone', required:true, aliases:['phone','mobile','contact'], type:'phone' },
+        { key:'email', label:'Email', required:true, aliases:['email'], type:'email' },
+        { key:'address', label:'Address', required:true, aliases:['address'] },
+        { key:'blood', label:'Blood Group', aliases:['blood group','blood'] },
+        { key:'aadhar', label:'Aadhar Number', aliases:['aadhar','aadhaar','aadhar number'], type:'aadhar' },
+        { key:'qualification', label:'Qualification', aliases:['qualification'] },
+        { key:'experience', label:'Experience (Years)', aliases:['experience','experience (years)'] },
+        { key:'salary', label:'Basic Salary', aliases:['salary','basic salary'] },
+        { key:'status', label:'Status', aliases:['status'], defaultWhenBlank:'Active' },
+      ],
+    },
+  };
+
+  function normalizeImportHeader(h){
+    return (h||'').toString().trim().replace(/\s*\*+\s*$/,'').toLowerCase().replace(/[^a-z0-9]+/g,' ').trim();
+  }
+  function autoMapImportColumns(entityKey, headers){
+    const defs = IMPORT_FIELD_DEFS[entityKey].fields;
+    const normHeaders = headers.map(h => ({ raw:h, norm: normalizeImportHeader(h) }));
+    const mapping = {};
+    defs.forEach(f => {
+      const candidates = [normalizeImportHeader(f.label), ...(f.aliases||[]).map(normalizeImportHeader)];
+      const hit = normHeaders.find(h => candidates.includes(h.norm));
+      mapping[f.key] = hit ? hit.raw : '';
+    });
+    return mapping;
+  }
+
+  let importWizard = null;
+
+  function openImportWizard(entityKey){
+    importWizard = { entity: entityKey, step: 1, headers: [], rawRows: [], mapping: {}, validated: [], filter: 'all' };
+    document.getElementById('importWizardTitle').textContent = 'Bulk Import — ' + IMPORT_FIELD_DEFS[entityKey].label;
+    document.getElementById('importWizardOverlay').classList.add('open');
+    renderImportWizardSteps();
+    renderImportWizardStep1();
+    document.getElementById('moreActionsMenu') && document.getElementById('moreActionsMenu').classList.remove('open');
+  }
+  function closeImportWizard(){
+    document.getElementById('importWizardOverlay').classList.remove('open');
+    importWizard = null;
+  }
+  function renderImportWizardSteps(){
+    const labels = ['1. Upload','2. Match Columns','3. Preview & Validate','4. Import'];
+    document.getElementById('importWizardSteps').innerHTML = labels.map((l,i) => {
+      const n = i+1;
+      const bg = n === importWizard.step ? 'var(--navy)' : (n < importWizard.step ? 'var(--teal)' : 'var(--cream)');
+      const color = n <= importWizard.step ? '#fff' : 'var(--ink-soft)';
+      return `<span style="background:${bg}; color:${color}; padding:6px 12px; border-radius:20px; font-size:0.72rem; font-weight:700;">${l}</span>`;
+    }).join('');
+  }
+
+  function renderImportWizardStep1(){
+    importWizard.step = 1;
+    renderImportWizardSteps();
+    const cfg = IMPORT_FIELD_DEFS[importWizard.entity];
+    document.getElementById('importWizardSub').textContent = `Step 1 of 4 — download the template (or use your school's own existing register), then upload it here.`;
+    document.getElementById('importWizardBody').innerHTML = `
+      <div style="border:1.5px dashed var(--border); border-radius:14px; padding:28px; text-align:center;">
+        <p style="margin-bottom:16px; color:var(--ink-soft); font-size:0.85rem;">
+          New to this? Download our template — required columns are marked with a red *.<br>
+          Already have your own ${cfg.label.toLowerCase()} register in Excel? Upload it directly — the next step lets you match its columns to ours, whatever they're named.
+        </p>
+        <button type="button" class="btn btn-ghost" onclick="downloadImportWizardTemplate()">Download ${cfg.label} Template (Excel)</button>
+        <div style="margin:18px 0 8px;">
+          <input type="file" id="importWizardFileInput" accept=".xlsx,.xls,.csv" style="display:none;" onchange="handleImportWizardFile(event)">
+          <button type="button" class="btn btn-primary" onclick="document.getElementById('importWizardFileInput').click()">Choose File to Upload</button>
+        </div>
+        <p id="importWizardFileName" style="color:var(--ink-soft); font-size:0.8rem;"></p>
+      </div>
+      <div class="modal-actions"><button type="button" class="btn btn-ghost" onclick="closeImportWizard()">Cancel</button></div>
+    `;
+  }
+
+  async function downloadImportWizardTemplate(){
+    if(!(await ensureXLSX())) return;
+    const cfg = IMPORT_FIELD_DEFS[importWizard.entity];
+    const headers = cfg.fields.map(f => f.label + (f.required ? ' *' : ''));
+    const ws = XLSX.utils.aoa_to_sheet([
+      headers,
+      ...cfg.sampleRows,
+      [],
+      ['* = required. A row missing a required column shows as an Error in the preview step and will not be imported until it\'s fixed.'],
+      [`Tip: leave "${cfg.matchKeyLabel}" blank to create a brand-new record. To UPDATE an existing one instead, put its exact ${cfg.matchKeyLabel} in that column — and leave any column blank that you don't want to change (blank never clears an existing value on an update).`],
+    ]);
+    ws['!cols'] = headers.map(h => ({ wch: Math.max(14, h.length+2) }));
+    const wb = XLSX.utils.book_new();
+    XLSX.utils.book_append_sheet(wb, ws, cfg.label);
+    XLSX.writeFile(wb, `${slugifySchoolName()}_${importWizard.entity}_import_template.xlsx`);
+    showToast('Template downloaded — fill it in, then upload it right here in the same window.');
+  }
+
+  async function handleImportWizardFile(e){
     if(!(await ensureXLSX())) { e.target.value=''; return; }
     const file = e.target.files[0];
     if(!file) return;
+    document.getElementById('importWizardFileName').textContent = 'Reading ' + file.name + '...';
     const reader = new FileReader();
-    reader.onload = async function(evt){
-     try{
-      let rows = [];
+    reader.onload = function(evt){
       try{
         const data = new Uint8Array(evt.target.result);
         const wb = XLSX.read(data, { type:'array', cellDates:true });
         const sheet = wb.Sheets[wb.SheetNames[0]];
-        rows = XLSX.utils.sheet_to_json(sheet, { defval:'' });
-      }catch(err){
-        showToast('Could not read this file. Please use an .xlsx file (e.g. the template).');
-        return;
-      }
-      if(rows.length === 0){ showToast('No rows found in that file.'); return; }
-
-      const toDateStr = val => {
-        if(val instanceof Date && !isNaN(val)) return val.toISOString().slice(0,10);
-        return val ? String(val).trim() : '';
-      };
-      const norm = obj => {
-        const out = {};
-        Object.keys(obj).forEach(k => {
-          const val = obj[k];
-          // Strip a trailing " *" (our own template marks required columns this way,
-          // e.g. "First Name *") so a re-uploaded, unmodified template still matches.
-          const cleanKey = k.trim().replace(/\s*\*+\s*$/, '').toLowerCase();
-          out[cleanKey] = (val instanceof Date) ? val : (val !== undefined && val !== null ? String(val).trim() : '');
-        });
-        return out;
-      };
-
-      // Mandatory columns for bulk import — kept in lockstep with the manual "Add
-      // Student" form's required fields (First Name, Last Name, Class, Section).
-      // A row missing any of these is skipped and counted, never silently guessed
-      // at (previously a blank Class/Section was silently defaulted, which could
-      // misfile a real student into the wrong class without any warning).
-      let added = 0, updated = 0, skipped = 0, autoMatchedCount = 0;
-      const skipReasons = { firstName: 0, lastName: 0, class: 0, section: 0 };
-      rows.forEach((row, i) => {
-        const rec = norm(row);
-        const firstName = rec['first name'] || rec['firstname'];
-        const lastNameVal = rec['last name'] || rec['lastname'] || '';
-        const classRaw = (rec['class']||'').toString().trim();
-        const sectionRaw = (rec['section']||'').toString().trim();
-
-        const missing = [];
-        if(!firstName) missing.push('firstName');
-        if(!lastNameVal) missing.push('lastName');
-        if(!classRaw) missing.push('class');
-        if(!sectionRaw) missing.push('section');
-        if(missing.length){
-          skipped++;
-          missing.forEach(m => skipReasons[m]++);
+        const rows = XLSX.utils.sheet_to_json(sheet, { defval:'' });
+        if(rows.length === 0){ showToast('No rows found in that file.'); document.getElementById('importWizardFileName').textContent=''; return; }
+        if(rows.length > 5000){ showToast(`That file has ${rows.length} rows — please split it into batches of 5,000 or fewer.`); document.getElementById('importWizardFileName').textContent=''; return; }
+        const headers = Object.keys(rows[0]);
+        const seen = new Set(); const dupes = [];
+        headers.forEach(h => { const n = h.trim().toLowerCase(); if(n && seen.has(n)) dupes.push(h); else seen.add(n); });
+        if(dupes.length){
+          showToast('Your file has duplicate column headers (' + dupes.join(', ') + ') — please fix and re-upload.');
+          document.getElementById('importWizardFileName').textContent = '';
           return;
         }
-
-        const admissionNoRaw = (rec['admission no'] || rec['admissionno'] || '').toString().trim();
-        const fields = {
-          firstName, lastName: lastNameVal,
-          name: firstName + ' ' + lastNameVal,
-          className: normalizeClassName(classRaw),
-          section: (() => {
-            const raw = sectionRaw.toUpperCase();
-            // Keep the value as typed if it doesn't match a known section, rather
-            // than silently defaulting to the first section (same philosophy as
-            // normalizeClassName for an unrecognized class).
-            return SECTIONS.find(s => s.toUpperCase() === raw) || raw;
-          })(),
-          gender: rec['gender'] || '',
-          dob: toDateStr(rec['date of birth'] || rec['dob']),
-          email: rec['email'] || '',
-          admDate: toDateStr(rec['date of joining'] || rec['admission date']),
-          blood: rec['blood group'] || '',
-          caste: rec['caste category'] || rec['caste'] || '',
-          religion: rec['religion'] || '',
-          fatherName: rec['father name'] || '',
-          fatherPhone: (rec['father phone']||'').toString(),
-          motherName: rec['mother name'] || '',
-          motherPhone: (rec['mother phone']||'').toString(),
-          fatherAddress: rec['address'] || '',
-          parent: rec['father name'] || rec['mother name'] || '',
-          contact: (rec['father phone'] || rec['mother phone'] || '').toString(),
-          needsTransport: /^y/i.test(rec['needs transport']||'') ? 'Yes' : 'No',
-          status: rec['status'] || 'Active',
-        };
-
-        let existing = admissionNoRaw ? students.find(s => (s.admissionNo||'').toLowerCase() === admissionNoRaw.toLowerCase()) : null;
-        let autoMatched = false;
-        if(!existing){
-          existing = findPossibleDuplicate(fields.firstName, fields.lastName, fields.className, fields.section, null);
-          if(existing) autoMatched = true;
-        }
-        if(existing){
-          Object.assign(existing, fields);
-          updated++;
-          if(autoMatched) autoMatchedCount++;
-        }else{
-          students.push({ id: 'stu_' + Date.now() + '_' + i, admissionNo: admissionNoRaw || nextAdmissionNo(), ...fields });
-          added++;
-        }
-      });
-      await persist();
-      renderDashboard();
-      renderAdmissionsBody();
-      let msg = added + ' added, ' + updated + ' updated.';
-      if(autoMatchedCount) msg += ' (' + autoMatchedCount + ' matched to an existing student by name/class instead of duplicating.)';
-      if(skipped){
-        const reasonParts = [];
-        if(skipReasons.firstName) reasonParts.push(skipReasons.firstName + ' missing First Name');
-        if(skipReasons.lastName) reasonParts.push(skipReasons.lastName + ' missing Last Name');
-        if(skipReasons.class) reasonParts.push(skipReasons.class + ' missing Class');
-        if(skipReasons.section) reasonParts.push(skipReasons.section + ' missing Section');
-        msg += ' ' + skipped + ' row(s) skipped — ' + reasonParts.join('; ') + '. (First Name, Last Name, Class and Section are required for every row.)';
+        importWizard.headers = headers;
+        importWizard.rawRows = rows;
+        importWizard.mapping = autoMapImportColumns(importWizard.entity, headers);
+        renderImportWizardStep2();
+      }catch(err){
+        showToast('Could not read this file. Please use an .xlsx file (e.g. the template).');
+        document.getElementById('importWizardFileName').textContent = '';
       }
-      showToast(msg);
-      e.target.value = '';
-     }catch(outerErr){
-      showToast('Import failed unexpectedly: ' + (outerErr && outerErr.message ? outerErr.message : outerErr));
-      e.target.value = '';
-     }
     };
-    reader.onerror = function(){
-      showToast('Could not read the selected file.');
-      e.target.value = '';
-    };
+    reader.onerror = function(){ showToast('Could not read the selected file.'); };
     reader.readAsArrayBuffer(file);
-    document.getElementById('moreActionsMenu').classList.remove('open');
+  }
+
+  function renderImportWizardStep2(){
+    importWizard.step = 2;
+    renderImportWizardSteps();
+    const cfg = IMPORT_FIELD_DEFS[importWizard.entity];
+    document.getElementById('importWizardSub').textContent = `Step 2 of 4 — we matched your file's columns automatically where we could. Fix any that are wrong, or pick a column for anything left unmatched. Required fields must be matched to continue.`;
+    const headerOptions = ['', ...importWizard.headers];
+    document.getElementById('importWizardBody').innerHTML = `
+      <div style="max-height:420px; overflow-y:auto;">
+        <table style="width:100%; border-collapse:collapse; font-size:0.85rem;">
+          <thead><tr style="background:var(--cream);"><th style="padding:8px; text-align:left;">Our Field</th><th style="padding:8px; text-align:left;">Your Column</th></tr></thead>
+          <tbody>
+            ${cfg.fields.map(f => `
+              <tr style="border-top:1px solid var(--border);">
+                <td style="padding:8px;">${escapeHtml(f.label)}${f.required?' <span class="required-star">*</span>':''}</td>
+                <td style="padding:8px;">
+                  <select id="importMap_${f.key}" style="width:100%; padding:7px 9px; border-radius:8px; border:1.5px solid var(--border);">
+                    ${headerOptions.map(h => `<option value="${escapeHtml(h)}" ${importWizard.mapping[f.key]===h?'selected':''}>${h ? escapeHtml(h) : '— Not in file —'}</option>`).join('')}
+                  </select>
+                </td>
+              </tr>`).join('')}
+          </tbody>
+        </table>
+      </div>
+      <div class="modal-actions">
+        <button type="button" class="btn btn-ghost" onclick="renderImportWizardStep1()">Back</button>
+        <button type="button" class="btn btn-primary" onclick="continueImportWizardMapping()">Continue to Preview</button>
+      </div>
+    `;
+  }
+
+  function continueImportWizardMapping(){
+    const cfg = IMPORT_FIELD_DEFS[importWizard.entity];
+    const mapping = {};
+    const missingRequired = [];
+    cfg.fields.forEach(f => {
+      const sel = document.getElementById('importMap_' + f.key);
+      mapping[f.key] = sel ? sel.value : '';
+      if(f.required && !mapping[f.key]) missingRequired.push(f.label);
+    });
+    if(missingRequired.length){
+      showToast('Please match a column for: ' + missingRequired.join(', '));
+      return;
+    }
+    importWizard.mapping = mapping;
+    validateImportWizardRows();
+    importWizard.filter = 'all';
+    renderImportWizardStep3();
+  }
+
+  function validateImportWizardRows(){
+    const cfg = IMPORT_FIELD_DEFS[importWizard.entity];
+    const seenMatchVals = new Map();
+    const seenIdentity = new Map();
+    const results = [];
+    importWizard.rawRows.forEach((row, idx) => {
+      const errors = [];
+      const warnings = [];
+      const fieldsOut = {};
+      const presentKeys = new Set();
+      cfg.fields.forEach(f => {
+        const colHeader = importWizard.mapping[f.key];
+        const raw = colHeader ? row[colHeader] : '';
+        const rawStr = (raw instanceof Date) ? raw : (raw !== undefined && raw !== null ? String(raw).trim() : '');
+        const hasValue = rawStr !== '' && !(rawStr instanceof Date && isNaN(rawStr));
+        const hasRealValue = raw instanceof Date ? !isNaN(raw) : hasValue;
+        if(f.required && !hasRealValue){
+          errors.push(`Missing required "${f.label}"`);
+          fieldsOut[f.key] = '';
+          return;
+        }
+        if(!hasRealValue){
+          fieldsOut[f.key] = f.defaultWhenBlank !== undefined ? f.defaultWhenBlank : '';
+          return;
+        }
+        const normalizedRaw = (raw instanceof Date) ? (isNaN(raw) ? '' : raw.toISOString().slice(0,10)) : rawStr;
+        const result = runImportFieldValidate(f, normalizedRaw);
+        fieldsOut[f.key] = result.value;
+        presentKeys.add(f.key);
+        if(result.error) errors.push(result.error);
+        else if(result.warning) warnings.push(result.warning);
+      });
+
+      const matchVal = (fieldsOut[cfg.matchKey] || '').toString().trim();
+      if(matchVal){
+        const key = matchVal.toLowerCase();
+        if(seenMatchVals.has(key)){
+          warnings.push(`Duplicate ${cfg.matchKeyLabel} "${matchVal}" also appears at row ${seenMatchVals.get(key)+2} in this file — later rows will overwrite earlier ones.`);
+        } else {
+          seenMatchVals.set(key, idx);
+        }
+      }
+
+      let existing = null;
+      if(errors.length === 0){
+        existing = cfg.findExisting(matchVal, fieldsOut);
+        if(!matchVal && existing){
+          const idKey = 'auto:' + existing.id;
+          if(seenIdentity.has(idKey)){
+            warnings.push(`This looks like a duplicate of row ${seenIdentity.get(idKey)+2} in this file (matched to the same existing record) — later rows will overwrite earlier ones.`);
+          } else {
+            seenIdentity.set(idKey, idx);
+          }
+        }
+      }
+
+      const status = errors.length ? 'error' : (existing ? 'update' : 'new');
+      results.push({ rowNum: idx+2, status, errors, warnings, fields: fieldsOut, presentKeys, existingId: existing ? existing.id : null });
+    });
+    importWizard.validated = results;
+  }
+
+  function importStatusBadge(r){
+    if(r.status==='error') return `<span style="color:#b3261e; font-weight:700;">Error</span>`;
+    if(r.warnings.length) return `<span style="color:#8a5300; font-weight:700;">${r.status==='new'?'New':'Update'} ⚠</span>`;
+    return r.status==='new' ? `<span style="color:#1b5e20; font-weight:700;">New</span>` : `<span style="color:#0d47a1; font-weight:700;">Update</span>`;
+  }
+  function setImportWizardFilter(f){ importWizard.filter = f; renderImportWizardStep3(); }
+
+  function renderImportWizardStep3(){
+    importWizard.step = 3;
+    renderImportWizardSteps();
+    const cfg = IMPORT_FIELD_DEFS[importWizard.entity];
+    const rows = importWizard.validated;
+    const counts = { new:0, update:0, error:0, warning:0 };
+    rows.forEach(r => { if(r.status!=='error') counts[r.status]++; else counts.error++; if(r.warnings.length) counts.warning++; });
+    document.getElementById('importWizardSub').textContent = `Step 3 of 4 — review every row below. Nothing is written to ${cfg.label} until you click Import.`;
+    const filter = importWizard.filter || 'all';
+    const filtered = rows.filter(r => {
+      if(filter==='all') return true;
+      if(filter==='error') return r.status==='error';
+      if(filter==='warning') return r.warnings.length>0;
+      return r.status===filter;
+    });
+    const visibleRows = filtered.slice(0, 200);
+    const previewFields = cfg.fields.filter(f => f.required || f.isMatchKey);
+    document.getElementById('importWizardBody').innerHTML = `
+      <div style="display:flex; gap:10px; flex-wrap:wrap; margin-bottom:14px;">
+        <span class="pill" style="background:#e8f5e9; color:#1b5e20;">${counts.new} new</span>
+        <span class="pill" style="background:#e3f2fd; color:#0d47a1;">${counts.update} update</span>
+        <span class="pill" style="background:#fff3e0; color:#8a5300;">${counts.warning} with warnings</span>
+        <span class="pill" style="background:#fdecea; color:#b3261e;">${counts.error} error(s) — won't be imported</span>
+      </div>
+      <div style="display:flex; gap:8px; margin-bottom:12px; flex-wrap:wrap;">
+        ${['all','new','update','warning','error'].map(f => `<button type="button" class="btn btn-ghost btn-sm" style="${filter===f?'border-color:var(--teal); border-width:2px;':''}" onclick="setImportWizardFilter('${f}')">${f==='all'?'All rows':f.charAt(0).toUpperCase()+f.slice(1)}</button>`).join('')}
+        <button type="button" class="btn btn-ghost btn-sm" onclick="downloadImportWizardErrorReport()" ${counts.error+counts.warning===0?'disabled':''}>📥 Download Issues Report</button>
+      </div>
+      <div style="max-height:380px; overflow:auto; border:1px solid var(--border); border-radius:10px;">
+        <table style="width:100%; border-collapse:collapse; font-size:0.78rem;">
+          <thead><tr style="background:var(--cream); position:sticky; top:0;">
+            <th style="padding:8px; text-align:left;">Row</th>
+            <th style="padding:8px; text-align:left;">Status</th>
+            ${previewFields.map(f=>`<th style="padding:8px; text-align:left;">${escapeHtml(f.label)}</th>`).join('')}
+            <th style="padding:8px; text-align:left;">Notes</th>
+          </tr></thead>
+          <tbody>
+            ${visibleRows.map(r => `
+              <tr style="border-top:1px solid var(--border);">
+                <td style="padding:7px;">${r.rowNum}</td>
+                <td style="padding:7px; white-space:nowrap;">${importStatusBadge(r)}</td>
+                ${previewFields.map(f=>`<td style="padding:7px;">${escapeHtml(r.fields[f.key]) || '—'}</td>`).join('')}
+                <td style="padding:7px; color:${r.errors.length?'#b3261e':'#8a5300'};">${escapeHtml([...r.errors, ...r.warnings].join(' · ')) || '—'}</td>
+              </tr>`).join('')}
+          </tbody>
+        </table>
+        ${filtered.length > visibleRows.length ? `<p style="padding:8px; margin:0; color:var(--ink-soft); font-size:0.76rem;">Showing first ${visibleRows.length} of ${filtered.length} matching rows — download the Issues Report to see everything.</p>` : ''}
+      </div>
+      <div class="modal-actions">
+        <button type="button" class="btn btn-ghost" onclick="renderImportWizardStep2()">Back</button>
+        <button type="button" class="btn btn-primary" onclick="commitImportWizard()" ${counts.new+counts.update===0?'disabled':''}>Import ${counts.new+counts.update} ${cfg.label} (${counts.new} new, ${counts.update} update)</button>
+      </div>
+    `;
+  }
+
+  async function downloadImportWizardErrorReport(){
+    if(!(await ensureXLSX())) return;
+    const cfg = IMPORT_FIELD_DEFS[importWizard.entity];
+    const rows = importWizard.validated.filter(r => r.status==='error' || r.warnings.length);
+    if(!rows.length){ showToast('No errors or warnings to report.'); return; }
+    const out = rows.map(r => {
+      const obj = { 'Row #': r.rowNum, 'Status': r.status==='error' ? 'Error — not imported' : (r.status==='new' ? 'New (with warning)' : 'Update (with warning)') };
+      cfg.fields.forEach(f => { obj[f.label] = r.fields[f.key] || ''; });
+      obj['Issues'] = [...r.errors, ...r.warnings].join(' | ');
+      return obj;
+    });
+    const ws = XLSX.utils.json_to_sheet(out);
+    const wb = XLSX.utils.book_new();
+    XLSX.utils.book_append_sheet(wb, ws, 'Issues');
+    XLSX.writeFile(wb, `${slugifySchoolName()}_${importWizard.entity}_import_issues.xlsx`);
+  }
+
+  async function commitImportWizard(){
+    const cfg = IMPORT_FIELD_DEFS[importWizard.entity];
+    const list = cfg.listRef();
+    const toCommit = importWizard.validated.filter(r => r.status !== 'error');
+    if(!toCommit.length){ showToast('Nothing to import — fix the errors first.'); return; }
+    const proceed = await showConfirmDialog(`Import ${toCommit.length} ${cfg.label.toLowerCase()} record(s) now?`, {title:'Confirm Import'});
+    if(!proceed) return;
+
+    let added = 0, updated = 0;
+    toCommit.forEach(r => {
+      if(r.existingId){
+        const existing = list.find(x => x.id === r.existingId);
+        if(existing){
+          // Patch semantics — see the big comment at the top of this section:
+          // only a field that actually had a value in this row is written;
+          // a blank cell never clears something already on file.
+          r.presentKeys.forEach(k => {
+            const f = cfg.fields.find(x => x.key === k);
+            if(f && f.isMatchKey) return;
+            existing[k] = r.fields[k];
+          });
+          if(cfg.deriveFields) cfg.deriveFields(existing);
+          updated++;
+        }
+      }else{
+        const rec = cfg.newRecordDefaults();
+        cfg.fields.forEach(f => { if(!f.isMatchKey) rec[f.key] = r.fields[f.key]; });
+        rec[cfg.matchKey] = r.fields[cfg.matchKey] || cfg.newIdValue();
+        if(cfg.deriveFields) cfg.deriveFields(rec);
+        list.push(rec);
+        added++;
+      }
+    });
+    await cfg.afterCommit();
+    const errorCount = importWizard.validated.length - toCommit.length;
+    let msg = `${added} added, ${updated} updated.`;
+    if(errorCount) msg += ` ${errorCount} row(s) had errors and were not imported — download the Issues Report from the previous step to see why.`;
+    showToast(msg);
+    closeImportWizard();
   }
 
   // ===== Recently Deleted (soft-delete trash + restore) =====
