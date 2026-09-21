@@ -695,6 +695,19 @@
   .profile-row span:first-child{color:var(--ink-soft);}
   .profile-row span:last-child{color:var(--ink); font-weight:500; text-align:right;}
 
+  /* ===== TEMPLATE CUSTOMIZE WIZARD (admit cards + report cards) ===== */
+  .tw-steps{display:flex; align-items:center; flex-wrap:wrap; gap:6px; margin-bottom:18px; font-size:0.78rem; color:var(--ink-soft);}
+  .tw-step{padding:4px 9px; border-radius:12px; background:var(--bg-soft,#f3f3f7); font-weight:600;}
+  .tw-step-active{background:var(--magenta); color:#fff;}
+  .tw-step-done{color:var(--magenta);}
+  .tw-step-arrow{color:var(--border);}
+  .tw-layout-grid{display:grid; grid-template-columns:repeat(auto-fit,minmax(200px,1fr)); gap:12px; margin-bottom:6px;}
+  .tw-layout-card{border:1.6px solid var(--border); border-radius:12px; padding:14px 16px; cursor:pointer; transition:border-color .15s ease, box-shadow .15s ease;}
+  .tw-layout-card:hover{border-color:var(--magenta);}
+  .tw-layout-card-sel{border-color:var(--magenta); box-shadow:0 0 0 2px rgba(209,16,115,0.15);}
+  .tw-layout-name{font-weight:700; font-size:0.9rem; color:var(--navy); margin-bottom:6px;}
+  .tw-layout-blurb{font-size:0.78rem; color:var(--ink-soft); line-height:1.45;}
+
   /* ===== WIZARD MODAL ===== */
   .wizard-tabs{display:flex; gap:6px; border-bottom:1.5px solid var(--border); margin-bottom:20px; flex-wrap:wrap;}
   .wtab{
@@ -2484,6 +2497,15 @@
       <div class="modal-actions">
         <button type="button" class="btn btn-primary" id="infoDialogOkBtn">OK</button>
       </div>
+    </div>
+  </div>
+</div>
+
+<div class="modal-overlay" id="templateWizardOverlay">
+  <div class="modal" style="max-width:760px;">
+    <div class="modal-inner">
+      <button class="modal-close" onclick="closeTemplateWizard()">&times;</button>
+      <div id="templateWizardBody"></div>
     </div>
   </div>
 </div>
@@ -7437,7 +7459,8 @@
             <div class="search-suggestions" id="rcSearchSuggestions"></div>
           </div>
           <select id="rcExamSelect" onchange="onRcExamChange()">${examOptions}</select>
-          <select id="rcTemplateSelect" title="Report template">${templateOptions}</select>
+          <select id="rcTemplateSelect" title="Report template" onchange="onRcTemplateChange()">${templateOptions}</select>
+          <button class="btn btn-ghost btn-sm" onclick="openTemplateManager('reportcard')">Customize Templates</button>
         </div>
       </div>
       <div id="rcResult"><div class="empty-state"><b>Search for a student</b>Pick a student above to preview and print their individual marks card.</div></div>
@@ -7480,9 +7503,10 @@
       const isPairEnd = (i % 2) === 1;
       if(!isLast && isPairEnd) pagesHtml += '<div style="page-break-after:always;"></div>';
     });
+    const fileTitle = `ReportCards_${exam.name.replace(/\s/g,'')}`;
     const w = window.open('', '_blank');
     w.document.write(`
-      <html><head><title>Marks Cards - ${exam.name}</title>
+      <html><head><title>${fileTitle}</title>
       <style>${reportCardPrintCss()}</style></head>
       <body onload="window.print()">${pagesHtml}</body></html>
     `);
@@ -7519,6 +7543,27 @@
   }
   function onRcExamChange(){
     if(rcCurrentStudentId) loadReportCardPreview();
+  }
+  function onRcTemplateChange(){
+    if(rcCurrentStudentId) loadReportCardPreview();
+  }
+  function coScholasticEditorHtml(s, exam, t){
+    if(!t || t.layout !== 'modern') return '';
+    const rec = examCoScholastic[coScholasticKeyFor(exam.id, s.id)] || { areas:{}, discipline:'' };
+    const areas = t.coScholasticAreas && t.coScholasticAreas.length ? t.coScholasticAreas : DEFAULT_COSCHOLASTIC_AREAS;
+    const grades = ['','A','B','C','D','E'];
+    const gradeSelect = (id, current) => `<select id="${id}">${grades.map(g => `<option value="${g}" ${current===g?'selected':''}>${g||'— Not graded —'}</option>`).join('')}</select>`;
+    return `
+      <div class="profile-card" style="margin-top:16px; max-width:520px;">
+        <h4 style="margin-bottom:10px;">Co-Scholastic Areas — ${t.name}</h4>
+        <p style="font-size:0.78rem; color:var(--ink-soft); margin-bottom:12px;">This template uses the CBSE-style layout, which prints a co-scholastic grade section. Set grades once per student per exam — they carry over to every future print until changed.</p>
+        <div class="form-grid">
+        ${areas.map(a => `<div class="f-field"><label>${a}</label>${gradeSelect('csg_'+a.replace(/[^a-zA-Z0-9]/g,''), (rec.areas&&rec.areas[a])||'')}</div>`).join('')}
+        ${t.showDiscipline!==false ? `<div class="f-field"><label>Discipline</label>${gradeSelect('csg_discipline', rec.discipline||'')}</div>` : ''}
+        </div>
+        <button class="btn btn-ghost btn-sm" style="margin-top:10px;" onclick="saveCoScholasticGrades('${exam.id}','${s.id}')">Save Grades</button>
+      </div>
+    `;
   }
 
   function loadReportCardPreview(){
@@ -7572,6 +7617,7 @@
         ${rankInfo ? `<div class="fee-sum-card"><b>${ordinalSuffix(rankInfo.rank)}</b><span>Class Rank (${s.className} — ${s.section}, of ${rankInfo.outOf})</span></div>` : ''}
         ${attCardHtml}
       </div>
+      ${coScholasticEditorHtml(s, exam, t)}
     `;
   }
 
@@ -7579,7 +7625,7 @@
     return `
       @page{ size:A4; margin:8mm; }
       body{ font-family:Arial,Helvetica,sans-serif; color:#111; }
-      .rc-card{ height:136mm; box-sizing:border-box; padding:6mm 8mm; border:1px solid #666; border-radius:3mm; overflow:hidden; page-break-inside:avoid; }
+      .rc-card{ min-height:136mm; box-sizing:border-box; padding:6mm 8mm; border:1px solid #666; border-radius:3mm; page-break-inside:avoid; }
       .rc-card + .rc-card{ margin-top:6mm; }
       .rc-head{ display:flex; align-items:center; gap:8px; justify-content:center; margin-bottom:3px; }
       .rc-head img{ width:30px; height:30px; border-radius:50%; }
@@ -7594,6 +7640,9 @@
       .rc-foot{ font-size:9px; color:#555; margin:0 0 6px; }
       .rc-sign{ display:flex; justify-content:space-between; font-size:9.5px; margin-top:10px; }
       .rc-sign img{ height:22px; display:block; margin-bottom:2px; }
+      .rc-cosch-title{ font-size:9px; font-weight:700; color:#211A4E; margin:6px 0 3px; border-top:1px dashed #999; padding-top:5px; }
+      .rc-cosch-grid{ display:grid; grid-template-columns:1fr 1fr; gap:1px 10px; font-size:9px; margin-bottom:5px; }
+      .rc-cosch-grid div{ display:flex; justify-content:space-between; border-bottom:1px dotted #ccc; padding:1px 0; }
     `;
   }
   function buildInfoFieldLines(s, exam, t){
@@ -7679,6 +7728,17 @@
       default: return n + 'th';
     }
   }
+  function coScholasticSectionHtml(s, exam, t){
+    if(!t || t.layout !== 'modern') return '';
+    const rec = examCoScholastic[coScholasticKeyFor(exam.id, s.id)] || { areas:{}, discipline:'' };
+    const areas = t.coScholasticAreas && t.coScholasticAreas.length ? t.coScholasticAreas : DEFAULT_COSCHOLASTIC_AREAS;
+    const areaLines = areas.map(a => `<div><span>${a}</span><b>${(rec.areas && rec.areas[a]) || '—'}</b></div>`).join('');
+    const disciplineLine = t.showDiscipline!==false ? `<div><span>Discipline</span><b>${rec.discipline || '—'}</b></div>` : '';
+    return `
+      <div class="rc-cosch-title">CO-SCHOLASTIC AREAS (Grade A–E)</div>
+      <div class="rc-cosch-grid">${areaLines}${disciplineLine}</div>
+    `;
+  }
   function reportCardPageHtml(s, exam, logoSrc, template){
     const t = template || reportTemplates.find(x => x.isDefault) || reportTemplates[0] || { signatureLabel1:'Class Teacher', signatureLabel2:'Principal / Correspondent', showElective:true, showNotCounted:true, showAttendance:true, showClassTopper:true, showRank:true };
     const showTopper = t.showClassTopper !== false;
@@ -7716,6 +7776,7 @@
         <div>Grade: <b>${grade}</b></div>
         ${rankInfo ? `<div>Class Rank: <b>${ordinalSuffix(rankInfo.rank)}</b> of ${rankInfo.outOf} (${s.className} — ${s.section})</div>` : ''}
       </div>
+      ${coScholasticSectionHtml(s, exam, t)}
       ${t.footerNote ? `<p class="rc-foot">${t.footerNote}</p>` : ''}
       <div class="rc-sign">
         <div>${resolveReportSignature1(t,s) ? `<img src="${resolveReportSignature1(t,s)}">` : ''}${t.signatureLabel1 || 'Class Teacher'}</div>
@@ -7730,9 +7791,13 @@
     if(!s || !exam) return;
     const template = currentReportTemplate();
     const logoSrc = document.querySelector('.sb-brand img').src;
+    // The <title> here becomes the browser's default "Save as PDF" filename,
+    // so a descriptive, unique one saves the user from renaming every file
+    // by hand — one of the "output options" a print dialog alone doesn't give.
+    const fileTitle = `ReportCard_${(s.admissionNo||s.id)}_${(s.firstName+s.lastName).replace(/\s/g,'')}_${exam.name.replace(/\s/g,'')}`;
     const w = window.open('', '_blank');
     w.document.write(`
-      <html><head><title>Report Card - ${s.firstName} ${s.lastName}</title>
+      <html><head><title>${fileTitle}</title>
       <style>${reportCardPrintCss()}</style></head>
       <body onload="window.print()">${reportCardPageHtml(s, exam, logoSrc, template)}</body></html>
     `);
@@ -7845,30 +7910,89 @@
   let reportTemplates = [];
   let templatesView = 'list';
   let editingTemplateId = '';
+  // Default co-scholastic areas for the 'modern' (CBSE-style) report card layout —
+  // schools can rename/add/remove these per template via the Customize Wizard.
+  const DEFAULT_COSCHOLASTIC_AREAS = ['Work Education', 'Art Education', 'Health & Physical Education'];
   async function loadReportTemplates(){
     reportTemplates = await storageGet(REPORT_TEMPLATES_KEY, [
-      { id:'tmpl_classic', name:'Classic', titleOverride:'', signatureLabel1:'Class Teacher', signatureLabel2:'Principal / Correspondent', footerNote:'', showElective:true, showNotCounted:true, showAttendance:true, isDefault:true },
-      { id:'tmpl_compact', name:'Compact', titleOverride:'PROGRESS REPORT', signatureLabel1:'Class Teacher', signatureLabel2:'Head Master', footerNote:'', showElective:false, showNotCounted:false, showAttendance:true, isDefault:false },
-      { id:'tmpl_annual', name:'Annual Result', titleOverride:'ANNUAL PROGRESS REPORT', signatureLabel1:'Class Teacher', signatureLabel2:'Principal', footerNote:'This report card is valid only with the school seal.', showElective:true, showNotCounted:true, showAttendance:true, isDefault:false },
+      { id:'tmpl_classic', name:'Classic', layout:'classic', titleOverride:'', signatureLabel1:'Class Teacher', signatureLabel2:'Principal / Correspondent', footerNote:'', showElective:true, showNotCounted:true, showAttendance:true, isDefault:true },
+      { id:'tmpl_compact', name:'Compact', layout:'classic', titleOverride:'PROGRESS REPORT', signatureLabel1:'Class Teacher', signatureLabel2:'Head Master', footerNote:'', showElective:false, showNotCounted:false, showAttendance:true, isDefault:false },
+      { id:'tmpl_annual', name:'Annual Result', layout:'classic', titleOverride:'ANNUAL PROGRESS REPORT', signatureLabel1:'Class Teacher', signatureLabel2:'Principal', footerNote:'This report card is valid only with the school seal.', showElective:true, showNotCounted:true, showAttendance:true, isDefault:false },
+      { id:'tmpl_cbse', name:'CBSE Style (Co-Scholastic)', layout:'modern', titleOverride:'PROGRESS REPORT', signatureLabel1:'Class Teacher', signatureLabel2:'Principal', footerNote:'', showElective:true, showNotCounted:true, showAttendance:true, coScholasticAreas:DEFAULT_COSCHOLASTIC_AREAS.slice(), showDiscipline:true, isDefault:false },
     ]);
+    // Non-breaking migration: any template saved before the 'layout' field
+    // existed (or before co-scholastic support) gets safe defaults so old
+    // saved templates keep behaving exactly as they did.
+    reportTemplates.forEach(t => {
+      if(!t.layout) t.layout = 'classic';
+      if(!t.coScholasticAreas) t.coScholasticAreas = DEFAULT_COSCHOLASTIC_AREAS.slice();
+      if(t.showDiscipline === undefined) t.showDiscipline = true;
+    });
+  }
+
+  /* --- Admit Card Templates (multiple layouts, editable) --- */
+  const ADMIT_CARD_TEMPLATES_KEY = "admit-card-templates";
+  OBJECT_BACKED_KEYS[ADMIT_CARD_TEMPLATES_KEY] = '/api/kv/' + ADMIT_CARD_TEMPLATES_KEY;
+  let admitCardTemplates = [];
+  const DEFAULT_AC_INSTRUCTIONS = [
+    'Bring this admit card to every examination — no entry without it.',
+    'Report to the exam hall at least 15 minutes before the scheduled time.',
+    'Mobile phones and other electronic devices are not allowed inside the exam hall.',
+    'This card must be signed by the invigilator after every paper.',
+  ].join('\n');
+  async function loadAdmitCardTemplates(){
+    admitCardTemplates = await storageGet(ADMIT_CARD_TEMPLATES_KEY, [
+      { id:'ac_classic', name:'Classic Strip', layout:'strip', cardsPerPage:4, titleOverride:'', instructionsText:'', footerNote:'', isDefault:true },
+      { id:'ac_modern', name:'Modern Card', layout:'grid4', cardsPerPage:4, titleOverride:'', instructionsText:DEFAULT_AC_INSTRUCTIONS, footerNote:'', isDefault:false },
+      { id:'ac_full', name:'Full Board-Style', layout:'full', cardsPerPage:1, titleOverride:'', instructionsText:DEFAULT_AC_INSTRUCTIONS, footerNote:'', isDefault:false },
+    ]);
+  }
+
+  /* --- Co-Scholastic Grades (CBSE-style 'modern' report card layout only) ---
+     Keyed examId::studentId -> { areas:{areaName:grade}, discipline:grade }.
+     Entirely optional — a report card prints fine with nothing set (shows
+     "—"), so this never blocks generating cards for classes that don't use
+     the modern layout. */
+  const EXAM_COSCHOLASTIC_KEY = "exam-coscholastic";
+  OBJECT_BACKED_KEYS[EXAM_COSCHOLASTIC_KEY] = '/api/kv/' + EXAM_COSCHOLASTIC_KEY;
+  let examCoScholastic = {};
+  async function loadExamCoScholastic(){
+    examCoScholastic = await storageGet(EXAM_COSCHOLASTIC_KEY, {});
+  }
+  function coScholasticKeyFor(examId, studentId){ return examId + '::' + studentId; }
+  async function saveCoScholasticGrades(examId, studentId){
+    const t = currentReportTemplate();
+    const areas = (t && t.coScholasticAreas) || DEFAULT_COSCHOLASTIC_AREAS;
+    const rec = { areas:{}, discipline:'' };
+    areas.forEach(a => {
+      const el = document.getElementById('csg_'+a.replace(/[^a-zA-Z0-9]/g,''));
+      if(el) rec.areas[a] = el.value;
+    });
+    const discEl = document.getElementById('csg_discipline');
+    if(discEl) rec.discipline = discEl.value;
+    examCoScholastic[coScholasticKeyFor(examId, studentId)] = rec;
+    await storageSet(EXAM_COSCHOLASTIC_KEY, examCoScholastic);
+    showToast('Co-scholastic grades saved.');
+    loadReportCardPreview();
   }
   function renderReportTemplatesTab(body){
     if(templatesView === 'edit') return renderTemplateEditor(body);
     body.innerHTML = `
       <p style="font-size:0.85rem; color:var(--ink-soft); margin-bottom:16px; max-width:640px;">
-        Create multiple progress report layouts — different titles, signature wording, uploaded signatures, or footer notes — then pick which one to use each time you print, from the Progress Reports tab.
+        Create multiple progress report layouts — Classic or the CBSE-style Modern layout with co-scholastic grading, different titles, signature wording, uploaded signatures, or footer notes — then pick which one to use each time you print, from the Progress Reports tab.
       </p>
-      <button class="btn btn-primary btn-sm" style="margin-bottom:16px;" onclick="openTemplateEditor()">+ Add Template</button>
-      <div class="table-wrap" style="max-width:900px;">
-        <table><thead><tr><th>Template</th><th>Title</th><th>Signatures</th><th>Attendance</th><th>Default</th><th></th></tr></thead>
+      <button class="btn btn-primary btn-sm" style="margin-bottom:16px;" onclick="openTemplateManager('reportcard')">+ Add Template — Customize Wizard</button>
+      <div class="table-wrap" style="max-width:960px;">
+        <table><thead><tr><th>Template</th><th>Layout</th><th>Title</th><th>Signatures</th><th>Attendance</th><th>Default</th><th></th></tr></thead>
         <tbody>
         ${reportTemplates.map(t => `<tr>
           <td class="name-cell">${t.name}</td>
+          <td>${t.layout==='modern' ? 'Modern (CBSE-style)' : 'Classic'}</td>
           <td>${t.titleOverride || '(uses exam name)'}</td>
           <td>${t.signatureLabel1}${t.sigImage1?' 🖼':''} / ${t.signatureLabel2}${t.sigImage2?' 🖼':''}</td>
           <td>${t.showAttendance!==false ? '✓' : '—'}</td>
           <td>${t.isDefault ? '<span class="pill">Default</span>' : `<button class="btn-edit-text" onclick="setDefaultTemplate('${t.id}')">Set Default</button>`}</td>
-          <td><button class="btn-edit-text" onclick="openTemplateEditor('${t.id}')">Edit</button>&nbsp;·&nbsp;<button class="btn-edit-text" onclick="duplicateTemplate('${t.id}')">Duplicate</button>&nbsp;·&nbsp;<button class="btn-danger-text" onclick="deleteTemplate('${t.id}')">Delete</button></td>
+          <td><button class="btn-edit-text" onclick="openTemplateManagerEdit('reportcard','${t.id}')">Edit</button>&nbsp;·&nbsp;<button class="btn-edit-text" onclick="duplicateTemplate('${t.id}')">Duplicate</button>&nbsp;·&nbsp;<button class="btn-danger-text" onclick="deleteTemplate('${t.id}')">Delete</button></td>
         </tr>`).join('')}
         </tbody></table>
       </div>
@@ -8046,6 +8170,360 @@
     if(wasDefault && reportTemplates.length) reportTemplates[0].isDefault = true;
     await storageSet(REPORT_TEMPLATES_KEY, reportTemplates);
     renderReportTemplatesTab(document.getElementById('resultBody'));
+  }
+
+  /* --- Reusable Customize Wizard: manages both Admit Card templates and Report
+     Card templates from one step-based modal (Layout → Details → Review). --- */
+  let twKind = 'reportcard';   // 'reportcard' | 'admitcard'
+  let twListView = true;       // true = template list inside the modal, false = wizard steps
+  let twStep = 1;
+  let twEditingId = '';
+  let twDraft = {};
+  let twSig1Data = '', twSig2Data = '';
+
+  const AC_LAYOUT_DEFS = [
+    { key:'strip', name:'Classic Strip', blurb:'3–4 full-width hall-ticket strips stacked per A4 sheet, each with its own subject-wise date sheet and a signature cell per day. The most common format for internal school exams.' },
+    { key:'grid4', name:'Modern Card', blurb:'4 compact ID-style cards per A4 sheet in a 2×2 grid — photo, key details and hall ticket number, without a per-subject table. Fast to print for a whole class.' },
+    { key:'full', name:'Full Board-Style', blurb:'One full A4 page per candidate, board-exam style — larger photo, a full candidate-instructions block and the complete subject-wise date sheet. Best for board or competitive exams.' },
+  ];
+  const RC_LAYOUT_DEFS = [
+    { key:'classic', name:'Classic', blurb:'Subject-wise marks table with grade, remarks and signatures — the standard scholastic-only report card.' },
+    { key:'modern', name:'Modern (CBSE-style)', blurb:'Adds a co-scholastic grading section (Work Education, Art, Health & Physical Education, each graded A–E) plus a separate Discipline grade, alongside the scholastic marks table.' },
+  ];
+
+  function openTemplateManager(kind){
+    window.scrollTo({top:0,left:0,behavior:'instant'});
+    twKind = kind;
+    twListView = true;
+    twStep = 1;
+    twEditingId = '';
+    twDraft = {};
+    document.getElementById('templateWizardOverlay').classList.add('open');
+    renderTemplateWizard();
+  }
+  function closeTemplateWizard(){
+    document.getElementById('templateWizardOverlay').classList.remove('open');
+  }
+  function openTemplateManagerEdit(kind, id){
+    openTemplateManager(kind);
+    twStartEdit(id);
+  }
+  function twTemplates(){ return twKind === 'admitcard' ? admitCardTemplates : reportTemplates; }
+  function twStorageKey(){ return twKind === 'admitcard' ? ADMIT_CARD_TEMPLATES_KEY : REPORT_TEMPLATES_KEY; }
+  function twLayoutDefs(){ return twKind === 'admitcard' ? AC_LAYOUT_DEFS : RC_LAYOUT_DEFS; }
+  function twKindLabel(){ return twKind === 'admitcard' ? 'Admit Card' : 'Progress Report'; }
+  function twStepTitles(){ return twKind === 'admitcard' ? ['Choose Layout','Details & Content','Review & Save'] : ['Choose Layout','Details & Signatures','Review & Save']; }
+
+  function renderTemplateWizard(){
+    const box = document.getElementById('templateWizardBody');
+    if(!box) return;
+    box.innerHTML = twListView ? twRenderList() : twRenderWizardStep();
+  }
+  function twRenderList(){
+    const list = twTemplates();
+    return `
+      <h2 style="font-size:1.08rem; margin-bottom:4px;">${twKindLabel()} Templates</h2>
+      <p class="modal-sub">Create multiple ${twKindLabel().toLowerCase()} layouts, then pick which one to use each time you print.</p>
+      <button class="btn btn-primary btn-sm" style="margin-bottom:14px;" onclick="twStartNew()">+ New Template — Customize Wizard</button>
+      <div class="table-wrap">
+        <table><thead><tr><th>Template</th><th>Layout</th><th>Default</th><th></th></tr></thead>
+        <tbody>
+        ${list.map(t => `<tr>
+          <td class="name-cell">${t.name}</td>
+          <td>${(twLayoutDefs().find(l=>l.key===t.layout)||{}).name || t.layout}</td>
+          <td>${t.isDefault ? '<span class="pill">Default</span>' : `<button class="btn-edit-text" onclick="twSetDefault('${t.id}')">Set Default</button>`}</td>
+          <td><button class="btn-edit-text" onclick="twStartEdit('${t.id}')">Edit</button>&nbsp;·&nbsp;<button class="btn-edit-text" onclick="twDuplicate('${t.id}')">Duplicate</button>&nbsp;·&nbsp;<button class="btn-danger-text" onclick="twDelete('${t.id}')">Delete</button></td>
+        </tr>`).join('')}
+        </tbody></table>
+      </div>
+      <div class="modal-actions" style="margin-top:18px;">
+        <button class="btn btn-ghost" onclick="closeTemplateWizard()">Close</button>
+      </div>
+    `;
+  }
+  function twDefaultDraft(){
+    if(twKind === 'admitcard'){
+      return { id:'', name:'', layout:'strip', cardsPerPage:4, titleOverride:'', instructionsText:DEFAULT_AC_INSTRUCTIONS, footerNote:'', isDefault:false };
+    }
+    return { id:'', name:'', layout:'classic', titleOverride:'', infoFields:{...DEFAULT_INFO_FIELDS}, signatureLabel1:'Class Teacher', signatureLabel2:'Principal / Correspondent', sigImage1:'', sigImage2:'', footerNote:'', showElective:true, showNotCounted:true, showClassTopper:true, showRank:true, showAttendance:true, coScholasticAreas:DEFAULT_COSCHOLASTIC_AREAS.slice(), showDiscipline:true, isDefault:false };
+  }
+  function twStartNew(){
+    twEditingId = '';
+    twDraft = twDefaultDraft();
+    twSig1Data = ''; twSig2Data = '';
+    twStep = 1;
+    twListView = false;
+    renderTemplateWizard();
+  }
+  function twStartEdit(id){
+    const t = twTemplates().find(x => x.id === id);
+    if(!t) return;
+    twEditingId = id;
+    twDraft = JSON.parse(JSON.stringify(t));
+    if(twKind === 'reportcard'){
+      twDraft.infoFields = twDraft.infoFields || {...DEFAULT_INFO_FIELDS};
+      twDraft.coScholasticAreas = twDraft.coScholasticAreas || DEFAULT_COSCHOLASTIC_AREAS.slice();
+      twSig1Data = twDraft.sigImage1 || ''; twSig2Data = twDraft.sigImage2 || '';
+    }
+    twStep = 1;
+    twListView = false;
+    renderTemplateWizard();
+  }
+  async function twDuplicate(id){
+    const src = twTemplates().find(t => t.id === id);
+    if(!src) return;
+    const copy = { ...src, id: (twKind==='admitcard'?'ac_':'tmpl_')+Date.now(), name: src.name+' (Copy)', isDefault:false };
+    twTemplates().push(copy);
+    await storageSet(twStorageKey(), twTemplates());
+    showToast('Template duplicated.');
+    renderTemplateWizard();
+  }
+  async function twSetDefault(id){
+    twTemplates().forEach(t => { t.isDefault = (t.id === id); });
+    await storageSet(twStorageKey(), twTemplates());
+    renderTemplateWizard();
+  }
+  async function twDelete(id){
+    if(twTemplates().length <= 1){ showToast('Keep at least one template.'); return; }
+    if(!await showConfirmDialog('Delete this template?')) return;
+    const found = twTemplates().find(t => t.id === id);
+    const wasDefault = found && found.isDefault;
+    const filtered = twTemplates().filter(t => t.id !== id);
+    if(wasDefault && filtered.length) filtered[0].isDefault = true;
+    if(twKind === 'admitcard') admitCardTemplates = filtered; else reportTemplates = filtered;
+    await storageSet(twStorageKey(), filtered);
+    renderTemplateWizard();
+  }
+
+  function twRenderWizardStep(){
+    const titles = twStepTitles();
+    const stepsNav = titles.map((t,i) => `<span class="tw-step ${twStep===i+1?'tw-step-active':''} ${twStep>i+1?'tw-step-done':''}">${i+1}. ${t}</span>`).join('<span class="tw-step-arrow">→</span>');
+    let body = '';
+    if(twStep === 1) body = twStepLayout();
+    else if(twStep === 2) body = twKind === 'admitcard' ? twStepAdmitDetails() : twStepReportDetails();
+    else body = twStepReview();
+    return `
+      <div class="breadcrumb"><a onclick="twBackToList()">${twKindLabel()} Templates</a> &nbsp;/&nbsp; Customize Wizard</div>
+      <div class="tw-steps">${stepsNav}</div>
+      ${body}
+    `;
+  }
+  function twBackToList(){ twListView = true; renderTemplateWizard(); }
+  function twGoStep(n){ twStep = n; renderTemplateWizard(); }
+
+  function twStepLayout(){
+    const defs = twLayoutDefs();
+    return `
+      <div class="tw-layout-grid">
+        ${defs.map(l => `
+          <div class="tw-layout-card ${twDraft.layout===l.key?'tw-layout-card-sel':''}" onclick="twSelectLayout('${l.key}')">
+            <div class="tw-layout-name">${l.name}${twDraft.layout===l.key?' ✓':''}</div>
+            <div class="tw-layout-blurb">${l.blurb}</div>
+          </div>
+        `).join('')}
+      </div>
+      <div class="modal-actions" style="margin-top:18px;">
+        <button class="btn btn-ghost" onclick="twBackToList()">Cancel</button>
+        <button class="btn btn-primary" onclick="twGoStep(2)">Next</button>
+      </div>
+    `;
+  }
+  function twSelectLayout(key){
+    twDraft.layout = key;
+    if(twKind === 'admitcard') twDraft.cardsPerPage = key==='full' ? 1 : key==='grid4' ? 4 : (twDraft.cardsPerPage===3?3:4);
+    renderTemplateWizard();
+  }
+
+  function twStepAdmitDetails(){
+    const d = twDraft;
+    return `
+      <div class="profile-card" style="max-width:640px;">
+        <div class="form-grid">
+          <div class="f-field full"><label>Template Name <span class="required-star">*</span></label><input type="text" id="twName" value="${d.name}" placeholder="e.g. Board Exam Style"></div>
+          <div class="f-field full"><label>Title Override <span style="font-weight:400; color:var(--ink-soft);">— leave blank for "Admit Card"</span></label><input type="text" id="twTitle" value="${d.titleOverride||''}" placeholder="e.g. HALL TICKET"></div>
+        </div>
+        ${d.layout==='strip' ? `
+        <div class="f-field" style="max-width:280px;">
+          <label>Cards per A4 Sheet</label>
+          <select id="twCardsPerPage">
+            <option value="4" ${d.cardsPerPage!==3?'selected':''}>4 per sheet — compact</option>
+            <option value="3" ${d.cardsPerPage===3?'selected':''}>3 per sheet — more room to sign</option>
+          </select>
+        </div>` : `<p style="font-size:0.8rem; color:var(--ink-soft);">${d.layout==='full' ? '1 candidate per A4 sheet (fixed by this layout).' : '4 cards per A4 sheet, 2×2 grid (fixed by this layout).'}</p>`}
+        ${d.layout!=='strip' ? `
+        <div class="f-field full">
+          <label>Candidate Instructions <span style="font-weight:400; color:var(--ink-soft);">— one per line${d.layout==='grid4'?' (kept short — this layout has limited space)':''}</span></label>
+          <textarea id="twInstructions" rows="4" placeholder="e.g. Bring this admit card to every exam.">${d.instructionsText||''}</textarea>
+        </div>` : ''}
+        <div class="f-field full"><label>Footer Note</label><input type="text" id="twFooter" value="${d.footerNote||''}" placeholder="Optional remark shown at the bottom"></div>
+      </div>
+      <div class="modal-actions" style="margin-top:18px;">
+        <button class="btn btn-ghost" onclick="twGoStep(1)">Back</button>
+        <button class="btn btn-primary" onclick="twCollectAdmitDetails()">Next</button>
+      </div>
+    `;
+  }
+  function twCollectAdmitDetails(){
+    const name = document.getElementById('twName').value.trim();
+    if(!name){ showToast('Enter a template name.'); return; }
+    twDraft.name = name;
+    twDraft.titleOverride = document.getElementById('twTitle').value.trim();
+    const cppEl = document.getElementById('twCardsPerPage');
+    if(cppEl) twDraft.cardsPerPage = parseInt(cppEl.value);
+    const instrEl = document.getElementById('twInstructions');
+    if(instrEl) twDraft.instructionsText = instrEl.value;
+    twDraft.footerNote = document.getElementById('twFooter').value.trim();
+    twGoStep(3);
+  }
+
+  function twStepReportDetails(){
+    const d = twDraft;
+    const infoFields = d.infoFields || DEFAULT_INFO_FIELDS;
+    return `
+      <div class="profile-card" style="max-width:640px;">
+        <div class="form-grid">
+          <div class="f-field full"><label>Template Name <span class="required-star">*</span></label><input type="text" id="twName" value="${d.name}" placeholder="e.g. Half Yearly Format"></div>
+          <div class="f-field full"><label>Title Override <span style="font-weight:400; color:var(--ink-soft);">— leave blank to use "REPORT CARD — [Exam Name]"</span></label><input type="text" id="twTitle" value="${d.titleOverride||''}" placeholder="e.g. HALF YEARLY PROGRESS REPORT"></div>
+        </div>
+        <label style="font-size:0.8rem; font-weight:600; color:var(--navy); margin:14px 0 8px; display:block;">Student Info Fields to Show</label>
+        <div class="disc-checklist" style="max-height:200px; margin-bottom:6px; display:grid; grid-template-columns:1fr 1fr; gap:2px 10px;">
+          ${INFO_FIELD_DEFS.map(f => `<label class="disc-check-item"><input type="checkbox" class="tw-infofield-check" value="${f.key}" ${infoFields[f.key]?'checked':''} ${f.key==='studentName'?'disabled checked':''}> ${f.label}</label>`).join('')}
+        </div>
+        <label style="font-size:0.8rem; font-weight:600; color:var(--navy); margin:14px 0 8px; display:block;">Signature 1</label>
+        <div class="form-grid">
+          <div class="f-field"><label>Label</label><input type="text" id="twSig1" value="${d.signatureLabel1||'Class Teacher'}"></div>
+          <div class="f-field">
+            <label>Signature Image</label>
+            <div style="display:flex; align-items:center; gap:10px;">
+              <img id="twSig1Preview" src="${twSig1Data}" style="height:36px; ${twSig1Data?'':'display:none;'} border-bottom:1px solid var(--border);">
+              <label class="btn btn-ghost btn-sm" style="cursor:pointer;">Upload<input type="file" accept="image/*" style="display:none;" onchange="twPreviewSignature(event,1)"></label>
+              ${twSig1Data ? `<button type="button" class="btn-danger-text" onclick="twClearSignature(1)">Remove</button>` : ''}
+            </div>
+          </div>
+        </div>
+        <label style="font-size:0.8rem; font-weight:600; color:var(--navy); margin:14px 0 8px; display:block;">Signature 2</label>
+        <div class="form-grid">
+          <div class="f-field"><label>Label</label><input type="text" id="twSig2" value="${d.signatureLabel2||'Principal / Correspondent'}"></div>
+          <div class="f-field">
+            <label>Signature Image</label>
+            <div style="display:flex; align-items:center; gap:10px;">
+              <img id="twSig2Preview" src="${twSig2Data}" style="height:36px; ${twSig2Data?'':'display:none;'} border-bottom:1px solid var(--border);">
+              <label class="btn btn-ghost btn-sm" style="cursor:pointer;">Upload<input type="file" accept="image/*" style="display:none;" onchange="twPreviewSignature(event,2)"></label>
+              ${twSig2Data ? `<button type="button" class="btn-danger-text" onclick="twClearSignature(2)">Remove</button>` : ''}
+            </div>
+          </div>
+        </div>
+        <div class="form-grid" style="margin-top:14px;">
+          <div class="f-field full"><label>Footer Note</label><input type="text" id="twFooter" value="${d.footerNote||''}" placeholder="Optional remark shown at the bottom of the card"></div>
+        </div>
+        <div style="display:flex; gap:30px; margin:14px 0; flex-wrap:wrap;">
+          <label class="admission-toggle"><input type="checkbox" id="twShowElective" ${d.showElective!==false?'checked':''}> Show "Elective" tag</label>
+          <label class="admission-toggle"><input type="checkbox" id="twShowNotCounted" ${d.showNotCounted!==false?'checked':''}> Show "Not counted" tag</label>
+          <label class="admission-toggle"><input type="checkbox" id="twShowClassTopper" ${d.showClassTopper!==false?'checked':''}> Show Highest Marks in Class per subject</label>
+          <label class="admission-toggle"><input type="checkbox" id="twShowRank" ${d.showRank!==false?'checked':''}> Show Class Rank (section-wise)</label>
+        </div>
+        ${d.layout==='modern' ? `
+        <label style="font-size:0.8rem; font-weight:600; color:var(--navy); margin:14px 0 8px; display:block;">Co-Scholastic Areas <span style="font-weight:400; color:var(--ink-soft);">— each graded A–E</span></label>
+        <div id="twCoschAreas">${(d.coScholasticAreas||DEFAULT_COSCHOLASTIC_AREAS).map((a,i) => `
+          <div style="display:flex; gap:8px; align-items:center; margin-bottom:6px;">
+            <input type="text" class="tw-cosch-area input" value="${a}" style="flex:1;">
+            <button type="button" class="btn-danger-text" onclick="twRemoveCoschArea(${i})">Remove</button>
+          </div>`).join('')}</div>
+        <button type="button" class="btn btn-ghost btn-sm" onclick="twAddCoschArea()">+ Add Area</button>
+        <label class="admission-toggle" style="display:block; margin-top:14px;"><input type="checkbox" id="twShowDiscipline" ${d.showDiscipline!==false?'checked':''}> Show separate Discipline grade</label>
+        ` : ''}
+      </div>
+      <div class="modal-actions" style="margin-top:18px;">
+        <button class="btn btn-ghost" onclick="twGoStep(1)">Back</button>
+        <button class="btn btn-primary" onclick="twCollectReportDetails()">Next</button>
+      </div>
+    `;
+  }
+  function twAddCoschArea(){
+    twSyncCoschAreasFromDom();
+    twDraft.coScholasticAreas.push('New Area');
+    renderTemplateWizard();
+  }
+  function twRemoveCoschArea(i){
+    twSyncCoschAreasFromDom();
+    twDraft.coScholasticAreas.splice(i,1);
+    renderTemplateWizard();
+  }
+  function twSyncCoschAreasFromDom(){
+    const inputs = document.querySelectorAll('.tw-cosch-area');
+    if(inputs.length) twDraft.coScholasticAreas = Array.from(inputs).map(i => i.value.trim()).filter(Boolean);
+    if(!twDraft.coScholasticAreas || !twDraft.coScholasticAreas.length) twDraft.coScholasticAreas = DEFAULT_COSCHOLASTIC_AREAS.slice();
+  }
+  function twPreviewSignature(e, which){
+    readImageFileWithSizeLimit(e, dataUrl => {
+      if(which===1){ twSig1Data = dataUrl; } else { twSig2Data = dataUrl; }
+      renderTemplateWizard();
+    });
+  }
+  function twClearSignature(which){
+    if(which===1) twSig1Data=''; else twSig2Data='';
+    renderTemplateWizard();
+  }
+  function twCollectReportDetails(){
+    const name = document.getElementById('twName').value.trim();
+    if(!name){ showToast('Enter a template name.'); return; }
+    twDraft.name = name;
+    twDraft.titleOverride = document.getElementById('twTitle').value.trim();
+    const infoFields = {};
+    INFO_FIELD_DEFS.forEach(f => {
+      infoFields[f.key] = f.key === 'studentName' ? true : document.querySelector(`.tw-infofield-check[value="${f.key}"]`).checked;
+    });
+    twDraft.infoFields = infoFields;
+    twDraft.showAttendance = infoFields.attendance;
+    twDraft.signatureLabel1 = document.getElementById('twSig1').value.trim() || 'Class Teacher';
+    twDraft.signatureLabel2 = document.getElementById('twSig2').value.trim() || 'Principal / Correspondent';
+    twDraft.sigImage1 = twSig1Data; twDraft.sigImage2 = twSig2Data;
+    twDraft.footerNote = document.getElementById('twFooter').value.trim();
+    twDraft.showElective = document.getElementById('twShowElective').checked;
+    twDraft.showNotCounted = document.getElementById('twShowNotCounted').checked;
+    twDraft.showClassTopper = document.getElementById('twShowClassTopper').checked;
+    twDraft.showRank = document.getElementById('twShowRank').checked;
+    if(twDraft.layout === 'modern'){
+      twSyncCoschAreasFromDom();
+      twDraft.showDiscipline = document.getElementById('twShowDiscipline').checked;
+    }
+    twGoStep(3);
+  }
+
+  function twStepReview(){
+    const d = twDraft;
+    const layoutName = (twLayoutDefs().find(l=>l.key===d.layout)||{}).name || d.layout;
+    return `
+      <div class="profile-card" style="max-width:600px;">
+        <div class="profile-row"><span>Name</span><span>${d.name}</span></div>
+        <div class="profile-row"><span>Layout</span><span>${layoutName}</span></div>
+        <div class="profile-row"><span>Title</span><span>${d.titleOverride || '(default)'}</span></div>
+        ${twKind==='admitcard' ? `<div class="profile-row"><span>Cards per Sheet</span><span>${d.cardsPerPage}</span></div>` : ''}
+        ${twKind==='reportcard' && d.layout==='modern' ? `<div class="profile-row"><span>Co-Scholastic Areas</span><span>${(d.coScholasticAreas||[]).join(', ')}</span></div>` : ''}
+        <div class="profile-row"><span>Footer Note</span><span>${d.footerNote || '—'}</span></div>
+      </div>
+      <p style="font-size:0.8rem; color:var(--ink-soft); margin-top:14px;">Review the details above, then save. You can edit this template again any time from the list.</p>
+      <div class="modal-actions" style="margin-top:18px;">
+        <button class="btn btn-ghost" onclick="twGoStep(2)">Back</button>
+        <button class="btn btn-primary" onclick="twSaveTemplate()">${twEditingId ? 'Save Changes' : 'Create Template'}</button>
+      </div>
+    `;
+  }
+  async function twSaveTemplate(){
+    const arr = twTemplates();
+    if(twEditingId){
+      const idx = arr.findIndex(x => x.id === twEditingId);
+      if(idx > -1) arr[idx] = { ...arr[idx], ...twDraft, id: twEditingId };
+    }else{
+      twDraft.id = (twKind==='admitcard'?'ac_':'tmpl_') + Date.now();
+      twDraft.isDefault = arr.length === 0;
+      arr.push(twDraft);
+    }
+    await storageSet(twStorageKey(), arr);
+    showToast('Template saved.');
+    twListView = true;
+    renderTemplateWizard();
+    if(document.getElementById('resultBody')) renderResultBody();
   }
 
   /* --- Exam Templates (which exams combine into a consolidated group) --- */
@@ -8863,7 +9341,11 @@
   /* --- Tab: Admit Cards --- */
   let admitCardsView = 'grid';
   let admitCardsExamId = '', admitCardsClass = '', admitCardsSection = '';
-  let admitCardsPerPage = 4; // 3 or 4 — how many hall-ticket strips are stacked on each printed A4 sheet
+  let admitCardsPerPage = 4; // 3 or 4 — how many hall-ticket strips are stacked on each printed A4 sheet (Classic Strip layout only)
+  let admitCardsTemplateId = ''; // '' = use the default admit card template
+  function currentAdmitCardTemplate(){
+    return admitCardTemplates.find(t => t.id === admitCardsTemplateId) || admitCardTemplates.find(t => t.isDefault) || admitCardTemplates[0];
+  }
 
   function renderAdmitCardsGrid(body){
     if(examDefs.length === 0){
@@ -8916,16 +9398,28 @@
       <div class="breadcrumb"><a onclick="backToAdmitCardsGrid()">All Classes</a> &nbsp;/&nbsp; ${admitCardsClass} — Section ${admitCardsSection} &nbsp;/&nbsp; ${exam.name}</div>
       ${subjects.length===0 ? `<div class="empty-state" style="margin-bottom:16px;"><b>No subjects configured yet</b>Hall tickets need at least one dated subject — configure subjects for this class &amp; section under the "Exams" tab first.</div>` : ``}
       ${subjects.length>0 && missingDates.length>0 ? `<div class="empty-state" style="margin-bottom:16px; border-color:var(--gold);"><b>⚠ ${missingDates.length} subject${missingDates.length===1?'':'s'} still need${missingDates.length===1?'s':''} an exam date</b>${missingDates.map(s=>s.name).join(', ')} — set a date for each under "Exams" → Configure Subjects before printing hall tickets.</div>` : ``}
-      ${(() => { const canPrint = getResultTabAccess(currentUser.role, 'result_admitcards', 'print'); return `
+      ${(() => {
+        const canPrint = getResultTabAccess(currentUser.role, 'result_admitcards', 'print');
+        const tmpl = currentAdmitCardTemplate();
+        const templateOptions = admitCardTemplates.map(t => `<option value="${t.id}" ${(admitCardsTemplateId?admitCardsTemplateId===t.id:t.isDefault)?'selected':''}>${t.name}</option>`).join('');
+        const perPageNote = tmpl && tmpl.layout==='strip'
+          ? `<select id="admitCardsPerPageSelect" onchange="admitCardsPerPage=parseInt(this.value);">
+              <option value="4" ${admitCardsPerPage===4?'selected':''}>4 per sheet — compact</option>
+              <option value="3" ${admitCardsPerPage===3?'selected':''}>3 per sheet — more room to sign</option>
+            </select>`
+          : `<div style="font-size:0.85rem; color:var(--ink-soft); padding:10px 0;">${tmpl && tmpl.layout==='full' ? '1 per A4 sheet (fixed by this layout)' : '4 per A4 sheet, 2×2 grid (fixed by this layout)'}</div>`;
+        return `
       <div style="display:flex; gap:14px; align-items:flex-end; flex-wrap:wrap; margin-bottom:16px;">
         ${canPrint ? `<button class="btn btn-primary" onclick="printAdmitCards('${admitCardsClass}','${admitCardsSection}', null)" ${(list.length===0 || subjects.length===0 || missingDates.length>0)?'disabled':''}>Print All Admit Cards</button>` : ''}
         <div class="f-field" style="max-width:230px; margin-bottom:0;">
-          <label>Cards per A4 Sheet</label>
-          <select id="admitCardsPerPageSelect" onchange="admitCardsPerPage=parseInt(this.value);">
-            <option value="4" ${admitCardsPerPage===4?'selected':''}>4 per sheet — compact</option>
-            <option value="3" ${admitCardsPerPage===3?'selected':''}>3 per sheet — more room to sign</option>
-          </select>
+          <label>Template</label>
+          <select id="admitCardsTemplateSelect" onchange="admitCardsTemplateId=this.value; renderResultBody();">${templateOptions}</select>
         </div>
+        <div class="f-field" style="max-width:230px; margin-bottom:0;">
+          <label>Cards per A4 Sheet</label>
+          ${perPageNote}
+        </div>
+        <button class="btn btn-ghost btn-sm" onclick="openTemplateManager('admitcard')">Customize Templates</button>
       </div>
       <div class="table-wrap">
         <table><thead><tr><th>Student</th><th>Admission No</th><th></th></tr></thead>
@@ -8938,7 +9432,7 @@
         </tbody></table>
         ${list.length===0 ? `<div class="empty-state"><b>No students here</b></div>` : ``}
       </div>
-      `; })()}
+        `; })()}
     `;
   }
 
@@ -8954,10 +9448,48 @@
     if(list.length === 0) return;
     const logoSrc = document.querySelector('.sb-brand img').src;
     const examPeriod = exam.startDate ? exam.startDate + (exam.endDate && exam.endDate!==exam.startDate ? ' – '+exam.endDate : '') : 'To be announced';
-    const perPage = (admitCardsPerPage===3) ? 3 : 4;
+    const tmpl = currentAdmitCardTemplate();
     const roomMap = computeExamHallTicketRoomMap(admitCardsExamId);
     const principalSig = schoolInfo.principalSignature || '';
+    const cardTitle = (tmpl.titleOverride||'').trim() || 'Admit Card';
+    const instructions = (tmpl.instructionsText||'').split('\n').map(l=>l.trim()).filter(Boolean);
+    const ctx = { exam, subjects, list, logoSrc, examPeriod, tmpl, roomMap, principalSig, cardTitle, instructions };
 
+    // Layout is template-driven: 'strip' (Classic Strip, unchanged), 'grid4'
+    // (Modern Card, 4-up 2x2 on A4) or 'full' (Full Board-Style, one candidate
+    // per A4 sheet with a full instructions block) — see admitCardTemplates.
+    const built = tmpl.layout === 'full' ? buildAdmitCardsFull(ctx)
+                : tmpl.layout === 'grid4' ? buildAdmitCardsGrid4(ctx)
+                : buildAdmitCardsStrip(ctx);
+
+    // Smart print filename: this becomes the print popup's document title, which
+    // browsers use to suggest a filename in the native "Save as PDF" dialog —
+    // so a descriptive, unique name lands there instead of a generic one.
+    const safe = str => (str||'').replace(/[^\w-]+/g,'_').replace(/^_+|_+$/g,'');
+    const fileTitle = singleStudentId
+      ? `AdmitCard_${safe(list[0].admissionNo)}_${safe((list[0].firstName||'')+(list[0].lastName||''))}_${safe(exam.name)}`
+      : `AdmitCards_${safe(cls)}_${safe(sec)}_${safe(exam.name)}`;
+
+    const w = window.open('', '_blank');
+    w.document.write(`
+      <html><head><title>${fileTitle}</title>
+      <style>
+        *{ box-sizing:border-box; }
+        @page{ size:A4; margin:8mm; }
+        body{ font-family:Arial,Helvetica,sans-serif; color:#111; margin:0; }
+        ${built.css}
+      </style></head>
+      <body onload="window.print()">
+        ${built.html}
+      </body></html>
+    `);
+    w.document.close();
+  }
+
+  // --- Layout: Classic Strip — 3 or 4 full-width horizontal strips stacked per A4 sheet ---
+  function buildAdmitCardsStrip(ctx){
+    const { exam, subjects, list, logoSrc, examPeriod, roomMap, principalSig } = ctx;
+    const perPage = (admitCardsPerPage===3) ? 3 : 4;
     // Each admit card is a full-width horizontal strip; 3 or 4 are stacked down a
     // portrait A4 sheet (chosen via the "Cards per A4 Sheet" selector). Every
     // subject row carries its own blank cell so a different invigilator can sign
@@ -9006,7 +9538,7 @@
 
     const pages = [];
     for(let i=0;i<list.length;i+=perPage) pages.push(list.slice(i, i+perPage));
-    const pagesHtml = pages.map((pageStudents, pIdx) => `
+    const html = pages.map((pageStudents, pIdx) => `
       <div class="ac-page${pIdx < pages.length-1 ? ' ac-pagebreak' : ''}">
         <div class="ac-stack">
           ${pageStudents.map((s,i) => stripHtml(s, i===pageStudents.length-1)).join('')}
@@ -9014,13 +9546,7 @@
       </div>
     `).join('');
 
-    const w = window.open('', '_blank');
-    w.document.write(`
-      <html><head><title>Admit Cards</title>
-      <style>
-        *{ box-sizing:border-box; }
-        @page{ size:A4; margin:8mm; }
-        body{ font-family:Arial,Helvetica,sans-serif; color:#111; margin:0; }
+    const css = `
         .ac-page{ width:100%; }
         .ac-pagebreak{ page-break-after:always; }
         .ac-stack{ display:flex; flex-direction:column; height:281mm; gap:4mm; }
@@ -9055,12 +9581,157 @@
         .ac-col-sign{ width:20mm; border-left:1px solid #333; padding:2mm 1.6mm; flex-shrink:0; display:flex; flex-direction:column; align-items:center; justify-content:flex-end; }
         .ac-sign-line{ width:100%; border-top:1px solid #555; text-align:center; font-size:5.6px; color:#666; padding-top:1mm; }
         .ac-sign-auto img{ display:block; max-width:100%; max-height:6mm; margin:0 auto 0.5mm; }
-      </style></head>
-      <body onload="window.print()">
-        ${pagesHtml}
-      </body></html>
-    `);
-    w.document.close();
+    `;
+    return { html, css };
+  }
+
+  // --- Layout: Modern Card — 4 compact cards per A4 sheet, 2×2 grid ---
+  function buildAdmitCardsGrid4(ctx){
+    const { exam, subjects, list, logoSrc, examPeriod, roomMap, principalSig, cardTitle, tmpl } = ctx;
+    const cardHtml = (s) => {
+      const ht = getHallTicket(admitCardsExamId, s.id);
+      const roomInfo = roomMap[s.id];
+      return `
+      <div class="acg-card">
+        <div class="acg-head">
+          <img class="acg-logo" src="${logoSrc}">
+          <div class="acg-head-text">
+            <div class="acg-school">${schoolInfo.name}</div>
+            <div class="acg-cardtitle">${cardTitle}</div>
+          </div>
+          <div class="acg-photo">${s.photo ? `<img src="${s.photo}">` : initials(s)}</div>
+        </div>
+        <div class="acg-examline">${exam.name} &nbsp;·&nbsp; ${examPeriod}</div>
+        <table class="acg-info">
+          <tr><td>Name</td><td>${s.firstName} ${s.lastName}</td></tr>
+          <tr><td>Admission No.</td><td>${s.admissionNo}</td></tr>
+          <tr><td>Class</td><td>${s.className} — ${s.section}</td></tr>
+          <tr><td>Roll No.</td><td>${s.rollNo||'—'}</td></tr>
+          <tr><td>Hall Ticket No.</td><td>${ht&&ht.htNumber?ht.htNumber:'—'}</td></tr>
+          <tr><td>Room</td><td>${roomInfo?roomInfo.room:'—'}</td></tr>
+        </table>
+        <div class="acg-subjcount">${subjects.length} subject${subjects.length===1?'':'s'} — see notice board / class teacher for the full subject-wise date sheet.</div>
+        ${tmpl.footerNote ? `<div class="acg-footnote">${tmpl.footerNote}</div>` : ''}
+        <div class="acg-signrow">
+          <div class="acg-sign">Student's Signature</div>
+          <div class="acg-sign acg-sign-auto">${principalSig ? `<img src="${principalSig}">` : ''}Principal</div>
+        </div>
+      </div>
+      `;
+    };
+    const pages = [];
+    for(let i=0;i<list.length;i+=4) pages.push(list.slice(i, i+4));
+    const html = pages.map((pageStudents, pIdx) => `
+      <div class="acg-page${pIdx < pages.length-1 ? ' acg-pagebreak' : ''}">
+        <div class="acg-grid">
+          ${pageStudents.map(s => cardHtml(s)).join('')}
+        </div>
+      </div>
+    `).join('');
+    const css = `
+        .acg-page{ width:100%; }
+        .acg-pagebreak{ page-break-after:always; }
+        .acg-grid{ display:grid; grid-template-columns:1fr 1fr; grid-template-rows:1fr 1fr; gap:6mm; height:281mm; }
+        .acg-card{ border:1.6px solid #1b2a52; border-radius:6px; padding:3mm 3.5mm; display:flex; flex-direction:column; page-break-inside:avoid; background:linear-gradient(180deg,#fbfbff 0%,#fff 26%); }
+        .acg-head{ display:flex; align-items:center; gap:2.5mm; border-bottom:1.4px solid #1b2a52; padding-bottom:2mm; margin-bottom:2mm; }
+        .acg-logo{ width:9mm; height:9mm; border-radius:50%; object-fit:cover; flex-shrink:0; }
+        .acg-head-text{ flex:1; min-width:0; }
+        .acg-school{ font-weight:800; font-size:9px; color:#1b2a52; line-height:1.15; }
+        .acg-cardtitle{ font-size:6.6px; font-weight:700; letter-spacing:.06em; text-transform:uppercase; color:#d11073; margin-top:0.6mm; }
+        .acg-photo{ width:12mm; height:14mm; border:1px solid #999; font-size:8px; font-weight:700; color:#999; display:flex; align-items:center; justify-content:center; text-align:center; background:#f7f7f7; overflow:hidden; flex-shrink:0; }
+        .acg-photo img{ width:100%; height:100%; object-fit:cover; }
+        .acg-examline{ font-size:7px; font-weight:700; color:#333; background:#eef0f4; border-radius:3px; padding:1mm 2mm; margin-bottom:2mm; }
+        .acg-info{ width:100%; font-size:7.6px; border-collapse:collapse; margin-bottom:2mm; }
+        .acg-info td{ padding:0.8px 0; }
+        .acg-info td:first-child{ color:#666; width:42%; }
+        .acg-info td:last-child{ font-weight:700; }
+        .acg-subjcount{ font-size:6.2px; color:#666; line-height:1.3; margin-bottom:auto; }
+        .acg-footnote{ font-size:6px; color:#d11073; font-weight:700; margin-top:1.5mm; }
+        .acg-signrow{ display:flex; justify-content:space-between; gap:4mm; margin-top:3mm; }
+        .acg-sign{ flex:1; border-top:1px solid #555; text-align:center; font-size:6px; color:#666; padding-top:1mm; }
+        .acg-sign-auto img{ display:block; max-width:100%; max-height:6mm; margin:0 auto 0.5mm; }
+    `;
+    return { html, css };
+  }
+
+  // --- Layout: Full Board-Style — one full A4 page per candidate ---
+  function buildAdmitCardsFull(ctx){
+    const { exam, subjects, list, logoSrc, examPeriod, roomMap, principalSig, cardTitle, instructions, tmpl } = ctx;
+    const pageHtml = (s, isLast) => {
+      const ht = getHallTicket(admitCardsExamId, s.id);
+      const roomInfo = roomMap[s.id];
+      return `
+      <div class="acf-page${!isLast ? ' acf-pagebreak' : ''}">
+        <div class="acf-sheet">
+          <div class="acf-header">
+            <img class="acf-logo" src="${logoSrc}">
+            <div class="acf-head-text">
+              <div class="acf-school">${schoolInfo.name}</div>
+              <div class="acf-addr">${schoolInfo.address||''}</div>
+            </div>
+          </div>
+          <div class="acf-title">${cardTitle}</div>
+          <div class="acf-examname">${exam.name} &nbsp;·&nbsp; ${examPeriod}</div>
+          <div class="acf-body">
+            <table class="acf-info">
+              <tr><td>Candidate Name</td><td>${s.firstName} ${s.lastName}</td></tr>
+              <tr><td>Admission No.</td><td>${s.admissionNo}</td></tr>
+              <tr><td>Class &amp; Section</td><td>${s.className} — ${s.section}</td></tr>
+              <tr><td>Roll No.</td><td>${s.rollNo||'—'}</td></tr>
+              <tr><td>Hall Ticket No.</td><td>${ht&&ht.htNumber?ht.htNumber:'—'}</td></tr>
+              <tr><td>Room / Seat</td><td>${roomInfo?(roomInfo.room+(roomInfo.seat?(' / Seat '+roomInfo.seat):'')):'—'}</td></tr>
+            </table>
+            <div class="acf-photo-slot">${s.photo ? `<img src="${s.photo}">` : initials(s)}</div>
+          </div>
+          <div class="acf-subj-title">SUBJECT-WISE SCHEDULE</div>
+          <table class="acf-subj-table">
+            <thead><tr><th>Subject</th><th>Date</th><th>Max Marks</th><th>Invigilator's Signature</th></tr></thead>
+            <tbody>
+            ${subjects.map(sub => `<tr><td>${sub.name}</td><td>${sub.date||'TBA'}</td><td>${sub.maxMarks||''}</td><td>&nbsp;</td></tr>`).join('')}
+            </tbody>
+          </table>
+          ${instructions.length ? `
+          <div class="acf-instr-title">CANDIDATE INSTRUCTIONS</div>
+          <ol class="acf-instr">${instructions.map(l => `<li>${l}</li>`).join('')}</ol>
+          ` : ''}
+          <div class="acf-signrow">
+            <div class="acf-sign">Student's Signature</div>
+            <div class="acf-sign acf-sign-auto">${principalSig ? `<img src="${principalSig}">` : ''}Principal / Correspondent</div>
+          </div>
+          ${tmpl.footerNote ? `<div class="acf-footnote">${tmpl.footerNote}</div>` : ''}
+        </div>
+      </div>
+      `;
+    };
+    const html = list.map((s,i) => pageHtml(s, i===list.length-1)).join('');
+    const css = `
+        .acf-page{ width:100%; }
+        .acf-pagebreak{ page-break-after:always; }
+        .acf-sheet{ border:1.6px solid #1b2a52; border-radius:4px; padding:8mm 10mm; min-height:281mm; }
+        .acf-header{ display:flex; align-items:center; gap:4mm; border-bottom:2px solid #1b2a52; padding-bottom:3mm; margin-bottom:3mm; }
+        .acf-logo{ width:16mm; height:16mm; border-radius:50%; object-fit:cover; flex-shrink:0; }
+        .acf-school{ font-weight:800; font-size:16px; color:#1b2a52; }
+        .acf-addr{ font-size:9px; color:#666; margin-top:1mm; }
+        .acf-title{ text-align:center; font-size:14px; font-weight:800; letter-spacing:.06em; text-transform:uppercase; color:#d11073; margin-top:2mm; }
+        .acf-examname{ text-align:center; font-size:10px; font-weight:700; color:#333; margin-top:1mm; margin-bottom:5mm; }
+        .acf-body{ display:flex; gap:8mm; align-items:flex-start; margin-bottom:6mm; }
+        .acf-info{ flex:1; font-size:10.5px; border-collapse:collapse; }
+        .acf-info td{ padding:2mm 0; border-bottom:1px dotted #ddd; }
+        .acf-info td:first-child{ color:#666; width:40%; }
+        .acf-info td:last-child{ font-weight:700; }
+        .acf-photo-slot{ width:30mm; height:36mm; border:1.4px solid #999; font-size:11px; font-weight:700; color:#999; display:flex; align-items:center; justify-content:center; text-align:center; background:#f7f7f7; overflow:hidden; flex-shrink:0; }
+        .acf-photo-slot img{ width:100%; height:100%; object-fit:cover; }
+        .acf-subj-title, .acf-instr-title{ font-size:10px; font-weight:700; color:#1b2a52; letter-spacing:.04em; margin-bottom:2mm; border-left:3px solid #d11073; padding-left:2mm; }
+        .acf-subj-table{ width:100%; border-collapse:collapse; font-size:9.5px; margin-bottom:6mm; }
+        .acf-subj-table th{ text-align:left; background:#eef0f4; padding:2mm 3mm; border:1px solid #ccc; }
+        .acf-subj-table td{ padding:2.6mm 3mm; border:1px solid #ccc; }
+        .acf-instr{ font-size:9px; color:#333; line-height:1.6; margin:0 0 6mm 4mm; padding:0; }
+        .acf-signrow{ display:flex; justify-content:space-between; gap:12mm; margin-top:14mm; }
+        .acf-sign{ flex:1; border-top:1px solid #555; text-align:center; font-size:9px; color:#666; padding-top:2mm; }
+        .acf-sign-auto img{ display:block; max-width:100%; max-height:10mm; margin:0 auto 1mm; }
+        .acf-footnote{ text-align:center; font-size:8px; color:#d11073; font-weight:700; margin-top:4mm; }
+    `;
+    return { html, css };
   }
 
   /* --- Tab: Consolidated Report (whole-year, all exams) --- */
@@ -21118,6 +21789,7 @@
       loadSchoolInfo(), loadFinance(), loadFeeExtras(), loadAttendance(),
       loadStaffAttendance(), loadExams(), loadRooms(), loadExamHallTickets(),
       loadExamRoomConfigs(), loadExamHolidays(), loadReportTemplates(),
+      loadAdmitCardTemplates(), loadExamCoScholastic(),
       loadAdminDownloads(), loadPendingApprovals(), loadInventory(),
       loadTimetable(), loadSyllabusHomework(), loadTransport(), loadLibrary(),
       loadHostel(), loadAccounting(), loadAccountingLedger(), loadComms(), loadStaff(),
