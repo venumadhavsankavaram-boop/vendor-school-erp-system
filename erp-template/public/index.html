@@ -2945,6 +2945,8 @@
     { key:'reports_accounts',   label:'Accounts Reports',   icon:'💰', category:'Reports' },
     { key:'reports_employee',   label:'Employee Reports',   icon:'🧑‍💼', category:'Reports' },
     { key:'reports_teacher_performance', label:'Teacher Performance Reports', icon:'🧑‍🏫', category:'Reports' },
+    { key:'reports_inventory',  label:'Inventory / Stock Reports', icon:'📦', category:'Reports', isNew:true },
+    { key:'reports_transport',  label:'Transport / Vehicle Reports', icon:'🚌', category:'Reports', isNew:true },
     { key:'reports_custom',     label:'Custom Report Builder', icon:'🛠️', category:'Reports' },
 
     { key:'setup',       label:'Initial Setup (legacy)', icon:'⚙️', category:'Configuration', hidden:true },
@@ -9234,6 +9236,8 @@
     Accounts:   { color:'#211A4E', bg:'rgba(33,26,78,0.08)' },
     Employee:   { color:'#6b4fa0', bg:'rgba(107,79,160,0.10)' },
     TeacherPerformance: { color:'#B8621B', bg:'rgba(184,98,27,0.10)' },
+    Inventory:  { color:'#B5533C', bg:'rgba(181,83,60,0.10)' },
+    Transport:  { color:'#2E6F9E', bg:'rgba(46,111,158,0.10)' },
   };
   function applyStudentScope(list, filters){
     let out = list;
@@ -9328,10 +9332,95 @@
       getRows(f){ return applyStaffScope(staffList.filter(staffIsActive), f).map(st => ({ 'Name':st.firstName+' '+st.lastName, 'Designation':st.designation||'', 'Phone':st.phone||'', 'Address':st.address||'' })); } },
     { id:'staff_salary', category:'Employee', name:'Staff Salary Summary', icon:'💵', scopable:'staff', desc:'Monthly salary on file for every active staff member.',
       getRows(f){ return applyStaffScope(staffList.filter(staffIsActive).filter(st=>st.salary), f).map(st => ({ 'Name':st.firstName+' '+st.lastName, 'Designation':st.designation||'', 'Department':st.department||'', 'Monthly Salary':st.salary })); } },
+
+    // Inventory / Stock
+    { id:'inv_current_stock', category:'Inventory', name:'Current Stock Report', icon:'📦', scopable:false, desc:'Every product with category, unit, size, stock on hand, and stock value.',
+      getRows(){ return inventoryItems.map(it => ({ 'Product':it.name, 'Type':it.type||'Sellable', 'Category':it.category||'', 'Sub-Category':it.subCategory||'', 'Size':it.size||'', 'Unit':it.unit||'Piece', 'Current Stock':it.quantity, 'Min Stock':it.threshold, 'Cost Price':it.costPrice, 'Selling Price':it.sellingPrice, 'Stock Value (Cost)':Math.round(it.quantity*it.costPrice*100)/100, 'Status':it.active===false?'Disabled':'Active' })); } },
+    { id:'inv_low_stock', category:'Inventory', name:'Low Stock / Out of Stock Report', icon:'⚠️', scopable:false, desc:'Products at or below their minimum stock threshold, out-of-stock items flagged separately.',
+      getRows(){ return inventoryItems.filter(it => it.quantity <= it.threshold).sort((a,b) => a.quantity-b.quantity).map(it => ({ 'Product':it.name, 'Category':it.category||'', 'Current Stock':it.quantity, 'Min Stock':it.threshold, 'Status':it.quantity<=0?'Out of Stock':'Low Stock' })); } },
+    { id:'inv_valuation', category:'Inventory', name:'Stock Valuation Report (Category-wise)', icon:'💹', scopable:false, desc:'Total stock quantity, cost value, and potential sale value, grouped by category.',
+      getRows(){
+        const byCat = {};
+        inventoryItems.forEach(it => {
+          const c = it.category || 'General';
+          if(!byCat[c]) byCat[c] = { qty:0, costValue:0, saleValue:0 };
+          byCat[c].qty += it.quantity;
+          byCat[c].costValue += it.quantity*it.costPrice;
+          byCat[c].saleValue += it.quantity*it.sellingPrice;
+        });
+        return Object.keys(byCat).map(c => ({ 'Category':c, 'Total Qty':byCat[c].qty, 'Stock Value (Cost)':Math.round(byCat[c].costValue*100)/100, 'Potential Sale Value':Math.round(byCat[c].saleValue*100)/100, 'Potential Profit':Math.round((byCat[c].saleValue-byCat[c].costValue)*100)/100 }));
+      } },
+    { id:'inv_item_sales', category:'Inventory', name:'Item-wise Sales Report', icon:'📈', scopable:false, desc:'Total quantity sold, revenue, and profit for every product ever sold.',
+      getRows(){
+        const byItem = {};
+        inventorySales.forEach(s => {
+          if(!byItem[s.itemId]) byItem[s.itemId] = { name:s.itemName, qty:0, revenue:0, cost:0 };
+          byItem[s.itemId].qty += s.qty;
+          byItem[s.itemId].revenue += s.totalAmount||0;
+          byItem[s.itemId].cost += s.totalCost||0;
+        });
+        return Object.values(byItem).sort((a,b) => b.revenue-a.revenue).map(r => ({ 'Product':r.name, 'Qty Sold':r.qty, 'Revenue':Math.round(r.revenue*100)/100, 'Cost':Math.round(r.cost*100)/100, 'Profit':Math.round((r.revenue-r.cost)*100)/100 }));
+      } },
+    { id:'inv_sales_ledger', category:'Inventory', name:'Sales Ledger (Full)', icon:'🧾', scopable:'student', desc:'Every inventory sale transaction recorded — filter to one student via the Scope panel above.',
+      getRows(f){ let rows = inventorySales; if(f.studentId) rows = rows.filter(s => s.studentId===f.studentId); return rows.map(s => ({ 'Date':s.date, 'Product':s.itemName, 'Buyer':s.buyerName||'', 'Buyer Type':s.buyerType||'', 'Qty':s.qty, 'Unit Price':s.unitPrice, 'Discount':s.discount||0, 'Total':s.totalAmount, 'Paid':s.paidAmount, 'Mode':s.mode||'', 'Sold By':s.soldBy||'' })); } },
+    { id:'inv_returns_student', category:'Inventory', name:'Student / Sale Returns Report', icon:'↩️', scopable:false, desc:'Every item returned by a buyer after sale, with refund amount and reason.',
+      getRows(){ return inventoryReturns.map(r => ({ 'Date':r.date, 'Product':r.itemName, 'Buyer':r.buyerName||'', 'Qty':r.qty, 'Refund Amount':r.refundAmount, 'Refund Mode':r.refundMode||'', 'Reason':r.reason||'', 'Processed By':r.processedBy||'' })); } },
+    { id:'inv_returns_vendor', category:'Inventory', name:'Vendor Returns Report', icon:'📤', scopable:false, desc:'Every item sent back to a vendor/supplier, with cost reversed and reason.',
+      getRows(){ return inventoryVendorReturns.map(r => ({ 'Date':r.date, 'Product':r.itemName, 'Qty':r.qty, 'Cost Reversed':r.costReversed, 'Vendor':r.vendor||'', 'Reason':r.reason||'', 'Processed By':r.processedBy||'' })); } },
+    { id:'inv_tax_summary', category:'Inventory', name:'GST / Tax Summary Report', icon:'🏷️', scopable:false, desc:'Products grouped by HSN code and GST rate — handy when preparing GST filings.',
+      getRows(){
+        const byKey = {};
+        inventoryItems.forEach(it => {
+          const key = (it.hsnCode||'—') + '|' + (it.taxRate||0);
+          if(!byKey[key]) byKey[key] = { hsn:it.hsnCode||'—', rate:it.taxRate||0, count:0, stockValue:0 };
+          byKey[key].count++;
+          byKey[key].stockValue += it.quantity*it.sellingPrice;
+        });
+        return Object.values(byKey).map(k => ({ 'HSN Code':k.hsn, 'Tax Rate (GST %)':k.rate, 'Product Count':k.count, 'Stock Sale Value':Math.round(k.stockValue*100)/100 }));
+      } },
+    { id:'inv_non_sellable', category:'Inventory', name:'Non-Sellable / Asset Register', icon:'🗂️', scopable:false, desc:'Internal-use items (Non-Sellable) held in stock, with their recorded value.',
+      getRows(){ return inventoryItems.filter(it => it.type==='Non-Sellable').map(it => ({ 'Item':it.name, 'Category':it.category||'', 'Applicable Class':it.applicableClass||'', 'Quantity':it.quantity, 'Cost Price':it.costPrice, 'Total Value':Math.round(it.quantity*it.costPrice*100)/100 })); } },
+
+    // Transport / Vehicle
+    { id:'tr_fleet_summary', category:'Transport', name:'Fleet / Vehicle Summary', icon:'🚌', scopable:false, desc:'Every bus route with its vehicle, driver, stop count, fare range, and students assigned.',
+      getRows(){ return transportRoutes.map(r => { const fares = r.stops.map(s => Number(s.fare)||0); const fareRange = fares.length ? (Math.min(...fares)===Math.max(...fares) ? fmtMoney(Math.min(...fares)) : `${fmtMoney(Math.min(...fares))} – ${fmtMoney(Math.max(...fares))}`) : '—'; return { 'Route':r.name, 'Bus Number':r.busNumber||'', 'Driver Name':r.driverName||'', 'Driver Phone':r.driverPhone||'', 'Stops':r.stops.length, 'Fare Range':fareRange, 'Students Assigned':studentsOnRoute(r.id).length }; }); } },
+    { id:'tr_driver_directory', category:'Transport', name:'Driver Contact Directory', icon:'📇', scopable:false, desc:'Every route\'s driver name and phone number, for quick lookup.',
+      getRows(){ return transportRoutes.map(r => ({ 'Route':r.name, 'Bus Number':r.busNumber||'', 'Driver Name':r.driverName||'—', 'Driver Phone':r.driverPhone||'—' })); } },
+    { id:'tr_route_roster', category:'Transport', name:'Route-wise Student Roster (All Routes)', icon:'📋', scopable:'student', desc:'Every student using transport, with their route, stop, and bus — filter by class/section above.',
+      getRows(f){
+        const riders = applyStudentScope(students.filter(s => isActive(s) && s.needsTransport==='Yes' && s.transportRouteId), f);
+        return riders.map(s => {
+          const route = transportRoutes.find(r => r.id===s.transportRouteId);
+          const stop = route ? route.stops.find(st => st.id===s.transportStopId) : null;
+          return { 'Student':s.firstName+' '+s.lastName, 'Class':s.className, 'Section':s.section, 'Route':route?route.name:'—', 'Bus Number':route?(route.busNumber||''):'', 'Stop':stop?stop.name:'—', 'Fare (₹/year)':stop?stop.fare:0 };
+        });
+      } },
+    { id:'tr_fee_collection', category:'Transport', name:'Transport Fee Collection Report', icon:'💰', scopable:'student', desc:'Expected, collected, and outstanding bus fee for every student on transport.',
+      getRows(f){
+        const riders = applyStudentScope(students.filter(s => isActive(s) && s.needsTransport==='Yes'), f);
+        return riders.map(s => { const fin = computeStudentFinance(s); const route = transportRoutes.find(r => r.id===s.transportRouteId); return { 'Student':s.firstName+' '+s.lastName, 'Class':s.className, 'Section':s.section, 'Route':route?route.name:'Unassigned', 'Expected':fin.perCat.bus.expected, 'Collected':fin.perCat.bus.collected, 'Due':fin.perCat.bus.receivable }; });
+      } },
+    { id:'tr_route_fee_summary', category:'Transport', name:'Route-wise Fee Summary', icon:'📊', scopable:false, desc:'Student count, expected, collected, and due bus fee, totalled per route.',
+      getRows(){
+        const byRoute = {};
+        students.filter(s => isActive(s) && s.needsTransport==='Yes').forEach(s => {
+          const key = s.transportRouteId || '__unassigned__';
+          if(!byRoute[key]) byRoute[key] = { count:0, expected:0, collected:0, due:0 };
+          const fin = computeStudentFinance(s);
+          byRoute[key].count++;
+          byRoute[key].expected += fin.perCat.bus.expected;
+          byRoute[key].collected += fin.perCat.bus.collected;
+          byRoute[key].due += fin.perCat.bus.receivable;
+        });
+        return Object.keys(byRoute).map(key => { const route = transportRoutes.find(r => r.id===key); const b = byRoute[key]; return { 'Route':route?route.name:'Unassigned', 'Students':b.count, 'Expected':Math.round(b.expected*100)/100, 'Collected':Math.round(b.collected*100)/100, 'Due':Math.round(b.due*100)/100 }; });
+      } },
+    { id:'tr_unassigned', category:'Transport', name:'Transport Requested but Unassigned', icon:'❓', scopable:'student', desc:'Students who need transport but have no route or stop assigned yet — a gap to fix before billing.',
+      getRows(f){ return applyStudentScope(students.filter(s => isActive(s) && s.needsTransport==='Yes' && (!s.transportRouteId || !s.transportStopId)), f).map(s => ({ 'Student':s.firstName+' '+s.lastName, 'Class':s.className, 'Section':s.section, 'Parent Phone':s.fatherPhone||s.motherPhone||'', 'Missing':!s.transportRouteId?'Route':'Stop' })); } },
   ];
   const REPORT_CATEGORY_TO_PERM = {
     Academic: 'reports_academic', Attendance: 'reports_attendance', Marks: 'reports_marks',
     Accounts: 'reports_accounts', Employee: 'reports_employee',
+    Inventory: 'reports_inventory', Transport: 'reports_transport',
   };
   function reportLibraryCategories(){
     const cats = [];
