@@ -1538,6 +1538,11 @@
         <button type="button" class="mf-tab" id="acttab-expense" onclick="switchAccountingTab('expense')">💸 Expenses</button>
         <button type="button" class="mf-tab" id="acttab-segments" onclick="switchAccountingTab('segments')">📈 P&amp;L by Account</button>
         <button type="button" class="mf-tab" id="acttab-categories" onclick="switchAccountingTab('categories')">🏷️ Categories</button>
+        <button type="button" class="mf-tab" id="acttab-chartofaccounts" onclick="switchAccountingTab('chartofaccounts')">🗂️ Chart of Accounts</button>
+        <button type="button" class="mf-tab" id="acttab-journal" onclick="switchAccountingTab('journal')">📒 Journal Vouchers</button>
+        <button type="button" class="mf-tab" id="acttab-bank" onclick="switchAccountingTab('bank')">🏦 Bank &amp; Reconciliation</button>
+        <button type="button" class="mf-tab" id="acttab-assets" onclick="switchAccountingTab('assets')">🏢 Fixed Assets</button>
+        <button type="button" class="mf-tab" id="acttab-budget" onclick="switchAccountingTab('budget')">📅 Budgets</button>
       </div>
       <div id="accountingBody"></div>
     </div>
@@ -2910,6 +2915,11 @@
     { key:'accounting_expenses', label:'Expenses',   icon:'💸', category:'Finance', parent:'accounting' },
     { key:'accounting_segments', label:'P&L by Account', icon:'📈', category:'Finance', parent:'accounting', isNew:true },
     { key:'accounting_categories', label:'Categories', icon:'🏷️', category:'Finance', parent:'accounting' },
+    { key:'accounting_chartofaccounts', label:'Chart of Accounts', icon:'🗂️', category:'Finance', parent:'accounting', isNew:true },
+    { key:'accounting_journal', label:'Journal Vouchers', icon:'📒', category:'Finance', parent:'accounting', isNew:true },
+    { key:'accounting_bank', label:'Bank & Reconciliation', icon:'🏦', category:'Finance', parent:'accounting', isNew:true },
+    { key:'accounting_assets', label:'Fixed Assets', icon:'🏢', category:'Finance', parent:'accounting', isNew:true },
+    { key:'accounting_budget', label:'Budgets', icon:'📅', category:'Finance', parent:'accounting', isNew:true },
 
     { key:'staff',       label:'Staff Directory',    icon:'🧑‍💼', category:'Staff' },
     { key:'staff_depts', label:'Departments & Designations', icon:'🏢', category:'Staff', isNew:true },
@@ -3137,7 +3147,7 @@
     // exactly as before those sub-permissions existed. An admin can then
     // selectively narrow individual sub-pages down afterward.
     const SUBMODULE_GROUPS_BY_PARENT = {
-      accounting: ['accounting_overview','accounting_income','accounting_expenses','accounting_segments','accounting_categories'],
+      accounting: ['accounting_overview','accounting_income','accounting_expenses','accounting_segments','accounting_categories','accounting_chartofaccounts','accounting_journal','accounting_bank','accounting_assets','accounting_budget'],
       result: RESULT_SUBMODULE_KEYS,
       setup: SETUP_SUBMODULE_KEYS,
       staff: STAFF_SUBPAGE_KEYS,
@@ -9331,6 +9341,100 @@
     { id:'fee_due_payable_classwise', category:'Accounts', name:'Fee Paid, Payable & Due Report (Student-wise)', icon:'📄', scopable:'student', special:true,
       desc:'Every student grouped by class, with Total Fee, Concession, Fee Payable, Fee Paid, and Fee Due — plus a subtotal per class and a grand total, matching your standard fee register format.' },
 
+    // Accounting — double-entry statements (Chart of Accounts, Journal
+    // Vouchers, Bank Accounts, Fixed Assets and Budgets are all managed
+    // under Finance → Accounting; these reports are the read side of that
+    // same live, self-balancing ledger).
+    { id:'acct_trial_balance', category:'Accounts', name:'Trial Balance', icon:'⚖️', scopable:false, desc:'Every ledger account with its live Debit or Credit balance — total Debit equals total Credit, proving the books balance.',
+      getRows(){
+        const ledger = acctBuildLedger();
+        const rows = getChartOfAccounts().map(acct => {
+          const bal = acctBalanceFromRows(ledger[acct.key]||[], acct.type);
+          if(!bal.debit && !bal.credit) return null;
+          const isDebitSide = bal.normalDebit ? bal.balance >= 0 : bal.balance < 0;
+          const amt = Math.round(Math.abs(bal.balance)*100)/100;
+          return { 'Account':acct.name, 'Group':acct.group, 'Debit':isDebitSide?amt:0, 'Credit':isDebitSide?0:amt };
+        }).filter(Boolean);
+        const totalDebit = Math.round(rows.reduce((s,r)=>s+r['Debit'],0)*100)/100;
+        const totalCredit = Math.round(rows.reduce((s,r)=>s+r['Credit'],0)*100)/100;
+        rows.push({ 'Account':'TOTAL', 'Group':'', 'Debit':totalDebit, 'Credit':totalCredit });
+        return rows;
+      } },
+    { id:'acct_day_book', category:'Accounts', name:'Day Book (All Transactions)', icon:'📖', scopable:false, desc:'Every posting in the books, chronological — the classic Day Book, across every account.',
+      getRows(){
+        const rows = acctAllPostings().slice().sort((a,b) => (a.date||'').localeCompare(b.date||''));
+        return rows.map(r => { const acct = coaAccountByKey(r.key); return { 'Date':r.date, 'Account':acct?acct.name:r.key, 'Narration':r.narration, 'Voucher No.':r.voucherNo||'—', 'Debit':r.debit||0, 'Credit':r.credit||0 }; });
+      } },
+    { id:'acct_cash_book', category:'Accounts', name:'Cash Book', icon:'💵', scopable:false, desc:'Every transaction through a Cash-in-Hand account, with a running balance.',
+      getRows(){
+        const ledger = acctBuildLedger();
+        const cashIds = acctBankAccounts.filter(b => b.type==='Cash').map(b => 'bank:'+b.id);
+        let rows = [];
+        cashIds.forEach(key => { (ledger[key]||[]).forEach(r => rows.push(r)); });
+        rows.sort((a,b) => (a.date||'').localeCompare(b.date||''));
+        let running = 0;
+        return rows.map(r => { running += r.debit - r.credit; return { 'Date':r.date, 'Narration':r.narration, 'Voucher No.':r.voucherNo||'—', 'Debit':r.debit||0, 'Credit':r.credit||0, 'Running Balance':Math.round(running*100)/100 }; });
+      } },
+    { id:'acct_bank_book', category:'Accounts', name:'Bank Book', icon:'🏦', scopable:false, desc:'Every transaction through every Bank account (excluding Cash-in-Hand), grouped by account with a running balance.',
+      getRows(){
+        const ledger = acctBuildLedger();
+        const out = [];
+        acctBankAccounts.filter(b => b.type==='Bank').forEach(b => {
+          const rows = (ledger['bank:'+b.id]||[]).slice().sort((a,c) => (a.date||'').localeCompare(c.date||''));
+          let running = 0;
+          rows.forEach(r => { running += r.debit - r.credit; out.push({ 'Bank Account':b.name, 'Date':r.date, 'Narration':r.narration, 'Voucher No.':r.voucherNo||'—', 'Debit':r.debit||0, 'Credit':r.credit||0, 'Running Balance':Math.round(running*100)/100 }); });
+        });
+        return out;
+      } },
+    { id:'acct_income_expenditure', category:'Accounts', name:'Income & Expenditure Statement', icon:'📊', scopable:false, desc:'Every Income and Expense account with its live total, and the resulting Surplus or Deficit — the school\'s profit & loss statement.',
+      getRows(){
+        const ledger = acctBuildLedger();
+        const coa = getChartOfAccounts();
+        const rows = [];
+        let totalIncome = 0, totalExpense = 0;
+        coa.filter(a => a.type==='Income').forEach(a => { const bal = acctBalanceFromRows(ledger[a.key]||[], 'Income').balance; if(bal){ totalIncome += bal; rows.push({ 'Head':'Income', 'Account':a.name, 'Amount':Math.round(bal*100)/100 }); } });
+        coa.filter(a => a.type==='Expense').forEach(a => { const bal = acctBalanceFromRows(ledger[a.key]||[], 'Expense').balance; if(bal){ totalExpense += bal; rows.push({ 'Head':'Expense', 'Account':a.name, 'Amount':Math.round(bal*100)/100 }); } });
+        rows.push({ 'Head':'Total Income', 'Account':'', 'Amount':Math.round(totalIncome*100)/100 });
+        rows.push({ 'Head':'Total Expense', 'Account':'', 'Amount':Math.round(totalExpense*100)/100 });
+        rows.push({ 'Head': (totalIncome-totalExpense)>=0 ? 'Surplus' : 'Deficit', 'Account':'', 'Amount':Math.round(Math.abs(totalIncome-totalExpense)*100)/100 });
+        return rows;
+      } },
+    { id:'acct_balance_sheet', category:'Accounts', name:'Balance Sheet', icon:'🧾', scopable:false, desc:'Assets, Liabilities and Equity as of today, including accumulated Surplus/Deficit — a real, self-balancing Balance Sheet built from every posting in the books.',
+      getRows(){
+        const ledger = acctBuildLedger();
+        const coa = getChartOfAccounts();
+        const rows = [];
+        let totalAssets=0, totalLiabilities=0, totalEquity=0, totalIncome=0, totalExpense=0;
+        coa.filter(a=>a.group==='Assets').forEach(a => { const bal = acctBalanceFromRows(ledger[a.key]||[], 'Asset').balance; if(bal){ totalAssets+=bal; rows.push({ 'Head':'Assets', 'Account':a.name, 'Amount':Math.round(bal*100)/100 }); } });
+        coa.filter(a=>a.group==='Liabilities').forEach(a => { const bal = acctBalanceFromRows(ledger[a.key]||[], 'Liability').balance; if(bal){ totalLiabilities+=bal; rows.push({ 'Head':'Liabilities', 'Account':a.name, 'Amount':Math.round(bal*100)/100 }); } });
+        coa.filter(a=>a.group==='Equity').forEach(a => { const bal = acctBalanceFromRows(ledger[a.key]||[], 'Equity').balance; if(bal){ totalEquity+=bal; rows.push({ 'Head':'Equity', 'Account':a.name, 'Amount':Math.round(bal*100)/100 }); } });
+        coa.filter(a=>a.type==='Income').forEach(a => { totalIncome += acctBalanceFromRows(ledger[a.key]||[], 'Income').balance; });
+        coa.filter(a=>a.type==='Expense').forEach(a => { totalExpense += acctBalanceFromRows(ledger[a.key]||[], 'Expense').balance; });
+        const surplus = totalIncome - totalExpense;
+        rows.push({ 'Head':'Equity', 'Account':'Accumulated Surplus / (Deficit)', 'Amount':Math.round(surplus*100)/100 });
+        totalEquity += surplus;
+        rows.push({ 'Head':'Total Assets', 'Account':'', 'Amount':Math.round(totalAssets*100)/100 });
+        rows.push({ 'Head':'Total Liabilities + Equity', 'Account':'', 'Amount':Math.round((totalLiabilities+totalEquity)*100)/100 });
+        return rows;
+      } },
+    { id:'acct_fixed_assets_register', category:'Accounts', name:'Fixed Assets Register', icon:'🏢', scopable:false, desc:'Every fixed asset with cost, accumulated depreciation, and current book value.',
+      getRows(){ return acctFixedAssets.map(a => ({ 'Asset':a.name, 'Category':a.category||'', 'Purchase Date':a.purchaseDate||'', 'Cost':a.purchaseCost, 'Useful Life (Yrs)':a.usefulLifeYears, 'Salvage Value':a.salvageValue||0, 'Accumulated Depreciation':acctAccumulatedDepreciation(a, acctToday()), 'Book Value':acctAssetBookValue(a, acctToday()), 'Status':a.active===false?'Disposed':'Active' })); } },
+    { id:'acct_depreciation_schedule', category:'Accounts', name:'Depreciation Schedule', icon:'📉', scopable:false, desc:'Annual straight-line depreciation charge for every active fixed asset, and the accumulated total to date.',
+      getRows(){ return acctFixedAssets.filter(a=>a.active!==false).map(a => ({ 'Asset':a.name, 'Cost':a.purchaseCost, 'Salvage Value':a.salvageValue||0, 'Useful Life (Yrs)':a.usefulLifeYears, 'Annual Depreciation':Math.round(acctAssetDepreciationPerYear(a)*100)/100, 'Accumulated To Date':acctAccumulatedDepreciation(a, acctToday()), 'Book Value':acctAssetBookValue(a, acctToday()) })); } },
+    { id:'acct_budget_variance', category:'Accounts', name:'Budget vs Actual', icon:'📅', scopable:false, desc:'Every budget line with its actual figure for the period and the variance against what was budgeted.',
+      getRows(){ return acctBudgets.map(b => { const acct = coaAccountByKey(b.accountKey); const actual = acctActualForAccountInRange(b.accountKey, b.startDate, b.endDate); return { 'Label':b.label, 'Period':b.startDate+' to '+b.endDate, 'Account':acct?acct.name:b.accountKey, 'Budgeted':b.budgetedAmount, 'Actual':Math.round(actual*100)/100, 'Variance':Math.round((actual-b.budgetedAmount)*100)/100 }; }); } },
+    { id:'acct_bank_reconciliation', category:'Accounts', name:'Bank Reconciliation Summary', icon:'🏦', scopable:false, desc:'Every Bank/Cash account with its ledger balance, reconciled balance, and difference against the last saved bank statement balance.',
+      getRows(){
+        const ledger = acctBuildLedger();
+        return acctBankAccounts.map(b => {
+          const rows = ledger['bank:'+b.id]||[];
+          const ledgerBal = rows.reduce((s,r)=>s+r.debit-r.credit,0);
+          const reconciledBal = rows.filter(r => acctReconciled[acctRowId(r)]).reduce((s,r)=>s+r.debit-r.credit,0);
+          const stmt = b.lastStatementBalance!=null ? Number(b.lastStatementBalance) : null;
+          return { 'Account':b.name, 'Ledger Balance':Math.round(ledgerBal*100)/100, 'Reconciled Balance':Math.round(reconciledBal*100)/100, 'Unreconciled Amount':Math.round((ledgerBal-reconciledBal)*100)/100, 'Statement Balance':stmt!=null?stmt:'—', 'Difference vs Statement':stmt!=null?Math.round((stmt-reconciledBal)*100)/100:'—' };
+        });
+      } },
+
     // Employee
     { id:'staff_directory', category:'Employee', name:'Staff Directory', icon:'🧑‍💼', scopable:'staff', desc:'Every active staff member with role, department, and contact.',
       getRows(f){ return applyStaffScope(staffList.filter(staffIsActive), f).map(st => ({ 'Staff ID':st.staffId, 'Name':st.firstName+' '+st.lastName, 'Designation':st.designation||'', 'Department':st.department||'', 'Phone':st.phone||'', 'Email':st.email||'' })); } },
@@ -12508,6 +12612,190 @@
   }
 
   let accountingTab = 'overview';
+
+  /* ===== DOUBLE-ENTRY ACCOUNTING ENGINE =====
+     Everything below sits ON TOP of the Income/Expense vouchers and Fee
+     payments above — none of that data or its schema changes. Every
+     historical fee payment / income voucher / expense voucher is treated as
+     an already-balanced Receipt or Payment posting (Dr/Cr against a
+     Bank/Cash account, inferred from its payment mode unless it explicitly
+     names one) so the Chart of Accounts, Journal Vouchers, Ledgers, Trial
+     Balance, Income & Expenditure Statement and Balance Sheet all work
+     correctly from day one — zero data migration, zero risk to live
+     records. New Journal Vouchers (manual adjustments, transfers, opening
+     entries) are genuinely double-entry: every line has a Debit or Credit,
+     and a voucher cannot be saved unless total Debit = total Credit. */
+  const ACCT_BANK_ACCOUNTS_KEY = "acct-bank-accounts";
+  const ACCT_FIXED_ASSETS_KEY = "acct-fixed-assets";
+  const ACCT_OTHER_LEDGERS_KEY = "acct-other-ledgers";
+  const ACCT_JOURNAL_KEY = "acct-journal-vouchers";
+  const ACCT_BUDGETS_KEY = "acct-budgets";
+  const ACCT_RECONCILED_KEY = "acct-reconciled";
+  [ACCT_BANK_ACCOUNTS_KEY, ACCT_FIXED_ASSETS_KEY, ACCT_OTHER_LEDGERS_KEY, ACCT_JOURNAL_KEY, ACCT_BUDGETS_KEY, ACCT_RECONCILED_KEY].forEach(k => { OBJECT_BACKED_KEYS[k] = '/api/kv/' + k; });
+  let acctBankAccounts = [], acctFixedAssets = [], acctOtherLedgers = [], acctJournalVouchers = [], acctBudgets = [], acctReconciled = {};
+  async function loadAccountingLedger(){
+    acctBankAccounts = await storageGet(ACCT_BANK_ACCOUNTS_KEY, [
+      { id:'bnk_cash', name:'Cash in Hand', bankName:'', accountNo:'', ifsc:'', type:'Cash', openingBalance:0, openingDate:'', active:true },
+      { id:'bnk_main', name:'Bank Account — Primary', bankName:'', accountNo:'', ifsc:'', type:'Bank', openingBalance:0, openingDate:'', active:true },
+    ]);
+    acctFixedAssets = await storageGet(ACCT_FIXED_ASSETS_KEY, []);
+    acctOtherLedgers = await storageGet(ACCT_OTHER_LEDGERS_KEY, []);
+    acctJournalVouchers = await storageGet(ACCT_JOURNAL_KEY, []);
+    acctBudgets = await storageGet(ACCT_BUDGETS_KEY, []);
+    acctReconciled = await storageGet(ACCT_RECONCILED_KEY, {});
+  }
+  function acctToday(){ return new Date().toISOString().slice(0,10); }
+
+  // The 5 fee-collection streams already flow through `payments[]` — each
+  // becomes its own built-in Income ledger account so the books show
+  // exactly where fee revenue came from, matching how top Indian school
+  // ERPs split fee income by type.
+  const FEE_INCOME_ACCOUNTS = {
+    fee:    { key:'feeinc:fee',    name:'Tuition Fee Income' },
+    bus:    { key:'feeinc:bus',    name:'Bus Fee Income' },
+    stock:  { key:'feeinc:stock',  name:'Stock / Canteen Sale Income' },
+    hostel: { key:'feeinc:hostel', name:'Hostel Fee Income' },
+    extra:  { key:'feeinc:extra',  name:'Other Fee Income (Admission, Fines, etc.)' },
+  };
+  function feeIncomeAccountFor(p){ return FEE_INCOME_ACCOUNTS[p.category] || FEE_INCOME_ACCOUNTS.extra; }
+  const ACCT_GROUP_LABEL = { Asset:'Assets', Liability:'Liabilities', Equity:'Equity', Income:'Income', Expense:'Expense' };
+  const ACCT_DEBIT_NORMAL_TYPES = new Set(['Asset','Expense']);
+  // The standard bookkeeping technique for digitizing an existing school's
+  // books: every opening balance (a bank account's starting balance, a
+  // fixed asset's purchase cost, a manually added liability/equity
+  // account's opening balance) needs an offsetting entry somewhere, or the
+  // ledger wouldn't actually balance. All of them post their other leg here
+  // — a normal, standard "Opening Balance Equity" clearing account that
+  // absorbs exactly the net effect of going live with pre-existing
+  // balances, the same way Tally/QuickBooks/ERPNext handle it.
+  const ACCT_OPENING_EQUITY_KEY = 'equity:__opening__';
+
+  // The Chart of Accounts IS this list — assembled live from its several
+  // real sources (Bank/Cash accounts, Fixed Assets, manually added Other
+  // Accounts, built-in Fee Income accounts, Income categories, Expense
+  // categories) rather than duplicated into a separate master list that
+  // could drift out of sync.
+  function getChartOfAccounts(){
+    const out = [];
+    acctBankAccounts.forEach(b => out.push({ key:'bank:'+b.id, name:b.name, group:'Assets', type:'Asset', sub:'Cash & Bank', active:b.active!==false }));
+    acctFixedAssets.forEach(a => out.push({ key:'asset:'+a.id, name:a.name, group:'Assets', type:'Asset', sub:'Fixed Assets', active:a.active!==false }));
+    acctOtherLedgers.forEach(l => out.push({ key:'ledger:'+l.id, name:l.name, group:ACCT_GROUP_LABEL[l.type]||l.type, type:l.type, sub:l.type, active:l.active!==false }));
+    Object.values(FEE_INCOME_ACCOUNTS).forEach(f => out.push({ key:f.key, name:f.name, group:'Income', type:'Income', sub:'Fee Income', active:true }));
+    acctIncomeCategories.forEach(c => out.push({ key:'income:'+c, name:c, group:'Income', type:'Income', sub:'Other Income', active:true }));
+    acctExpenseCategories.forEach(c => out.push({ key:'expense:'+c, name:c, group:'Expense', type:'Expense', sub:'Expense', active:true }));
+    if(acctFixedAssets.some(a=>a.active!==false)) out.push({ key:'expense:__depreciation__', name:'Depreciation', group:'Expense', type:'Expense', sub:'Expense', active:true });
+    out.push({ key:ACCT_OPENING_EQUITY_KEY, name:'Opening Balance Equity', group:'Equity', type:'Equity', sub:'Opening Balance Equity', active:true });
+    return out;
+  }
+  function coaAccountByKey(key){ return getChartOfAccounts().find(a => a.key === key); }
+
+  function defaultBankAccountForMode(mode){
+    const cashAcct = acctBankAccounts.find(b => b.type==='Cash' && b.active!==false) || acctBankAccounts.find(b => b.type==='Cash') || acctBankAccounts[0];
+    const bankAcct = acctBankAccounts.find(b => b.type==='Bank' && b.active!==false) || acctBankAccounts.find(b => b.type==='Bank') || cashAcct;
+    if((mode||'').toLowerCase() === 'cash') return cashAcct ? cashAcct.id : (bankAcct ? bankAcct.id : '');
+    return bankAcct ? bankAcct.id : (cashAcct ? cashAcct.id : '');
+  }
+  function acctBankAccountIdFor(record){ return record.bankAccountId || defaultBankAccountForMode(record.mode); }
+
+  // Straight-line depreciation, prorated by elapsed time and capped at the
+  // asset's useful life so book value never drops below salvage value.
+  function acctAssetDepreciationPerYear(a){
+    const cost = Number(a.purchaseCost)||0, salvage = Number(a.salvageValue)||0, life = Number(a.usefulLifeYears)||1;
+    return Math.max(0, (cost - salvage) / life);
+  }
+  function acctAccumulatedDepreciation(a, asOfDate){
+    if(!a.purchaseDate) return 0;
+    const purchaseDate = new Date(a.purchaseDate);
+    const asOf = asOfDate ? new Date(asOfDate) : new Date();
+    let years = (asOf - purchaseDate) / (365.25*86400000);
+    years = Math.max(0, Math.min(years, Number(a.usefulLifeYears)||1));
+    return Math.round(acctAssetDepreciationPerYear(a) * years * 100) / 100;
+  }
+  function acctAssetBookValue(a, asOfDate){
+    return Math.round(((Number(a.purchaseCost)||0) - acctAccumulatedDepreciation(a, asOfDate)) * 100) / 100;
+  }
+
+  // The core engine: every real transaction the school's books contain,
+  // flattened into individual Debit/Credit postings against a Chart of
+  // Accounts key. Recomputed on demand (never stored) so there is nothing to
+  // migrate and nothing that can drift out of sync with the source records.
+  function acctAllPostings(){
+    const rows = [];
+    const push = (date, key, debit, credit, narration, source, sourceId, extra) => { if(debit||credit) rows.push(Object.assign({ date:date||'2000-01-01', key, debit:debit||0, credit:credit||0, narration:narration||'', source, sourceId }, extra||{})); };
+    acctBankAccounts.forEach(b => {
+      const amt=Number(b.openingBalance)||0; if(!amt) return;
+      const debit = amt>0?amt:0, credit = amt<0?-amt:0;
+      push(b.openingDate, 'bank:'+b.id, debit, credit, 'Opening Balance', 'Opening', b.id);
+      push(b.openingDate, ACCT_OPENING_EQUITY_KEY, credit, debit, 'Opening Balance — '+b.name, 'Opening', b.id);
+    });
+    acctFixedAssets.forEach(a => {
+      const amt=Number(a.purchaseCost)||0; if(!amt) return;
+      push(a.purchaseDate, 'asset:'+a.id, amt, 0, 'Asset acquired — '+a.name, 'Asset Purchase', a.id);
+      push(a.purchaseDate, ACCT_OPENING_EQUITY_KEY, 0, amt, 'Asset acquired — '+a.name, 'Asset Purchase', a.id);
+    });
+    acctOtherLedgers.forEach(l => {
+      const amt = Number(l.openingBalance)||0; if(!amt) return;
+      const normalDebit = l.type === 'Asset';
+      const debit = normalDebit?Math.max(amt,0):(amt<0?-amt:0);
+      const credit = normalDebit?(amt<0?-amt:0):Math.max(amt,0);
+      push(l.openingDate, 'ledger:'+l.id, debit, credit, 'Opening Balance', 'Opening', l.id);
+      push(l.openingDate, ACCT_OPENING_EQUITY_KEY, credit, debit, 'Opening Balance — '+l.name, 'Opening', l.id);
+    });
+    payments.forEach(p => {
+      const amt = Number(p.amount)||0; if(!amt) return;
+      const bankKey = 'bank:'+acctBankAccountIdFor(p), incAcct = feeIncomeAccountFor(p);
+      const narr = 'Fee collected — ' + (p.studentName||'Student') + (p.receiptNo?' (Receipt '+p.receiptNo+')':'');
+      push(p.date, bankKey, amt, 0, narr, 'Fee Payment', p.id);
+      push(p.date, incAcct.key, 0, amt, narr, 'Fee Payment', p.id);
+    });
+    acctIncome.filter(i=>!i.voided).forEach(i => {
+      const amt = Number(i.amount)||0; if(!amt) return;
+      const bankKey = 'bank:'+acctBankAccountIdFor(i);
+      const narr = 'Receipt Voucher ' + i.voucherNo + ' — ' + i.category + (i.party?' ('+i.party+')':'');
+      push(i.date, bankKey, amt, 0, narr, 'Income Voucher', i.id, { voucherNo:i.voucherNo });
+      push(i.date, 'income:'+i.category, 0, amt, narr, 'Income Voucher', i.id, { voucherNo:i.voucherNo });
+    });
+    acctExpenses.filter(e=>!e.voided).forEach(e => {
+      const amt = Number(e.amount)||0; if(!amt) return;
+      const bankKey = 'bank:'+acctBankAccountIdFor(e);
+      const narr = 'Payment Voucher ' + e.voucherNo + ' — ' + e.category + (e.party?' to '+e.party:'');
+      push(e.date, 'expense:'+e.category, amt, 0, narr, 'Expense Voucher', e.id, { voucherNo:e.voucherNo });
+      push(e.date, bankKey, 0, amt, narr, 'Expense Voucher', e.id, { voucherNo:e.voucherNo });
+    });
+    acctJournalVouchers.filter(j=>!j.voided).forEach(j => {
+      (j.lines||[]).forEach(ln => push(j.date, ln.accountKey, Number(ln.debit)||0, Number(ln.credit)||0, j.narration||('Journal Voucher '+j.voucherNo), 'Journal Voucher', j.id, { voucherNo:j.voucherNo, jvType:j.type }));
+    });
+    acctFixedAssets.filter(a=>a.active!==false).forEach(a => {
+      const dep = acctAccumulatedDepreciation(a, acctToday());
+      if(dep > 0){
+        push(acctToday(), 'expense:__depreciation__', dep, 0, 'Accumulated depreciation — '+a.name, 'Depreciation', a.id);
+        push(acctToday(), 'asset:'+a.id, 0, dep, 'Accumulated depreciation — '+a.name, 'Depreciation', a.id);
+      }
+    });
+    return rows;
+  }
+  function acctBuildLedger(){
+    const byKey = {};
+    acctAllPostings().forEach(r => { (byKey[r.key] = byKey[r.key] || []).push(r); });
+    return byKey;
+  }
+  function acctBalanceFromRows(rows, type){
+    const debit = rows.reduce((s,r)=>s+r.debit,0), credit = rows.reduce((s,r)=>s+r.credit,0);
+    const normalDebit = ACCT_DEBIT_NORMAL_TYPES.has(type);
+    return { debit, credit, balance: normalDebit ? (debit-credit) : (credit-debit), normalDebit };
+  }
+  function acctActualForAccountInRange(key, startDate, endDate){
+    const rows = acctAllPostings().filter(r => r.key===key && (!startDate || r.date>=startDate) && (!endDate || r.date<=endDate));
+    const acct = coaAccountByKey(key);
+    return acctBalanceFromRows(rows, acct?acct.type:'Expense').balance;
+  }
+  function acctRowId(r){ return [r.source, r.sourceId, r.key].join('|'); }
+  async function toggleAcctReconciled(rowId, statementDate){
+    if(acctReconciled[rowId]) delete acctReconciled[rowId];
+    else acctReconciled[rowId] = { reconciledDate: statementDate || acctToday(), by: currentUser.name };
+    await storageSet(ACCT_RECONCILED_KEY, acctReconciled);
+  }
+
   /* ===== COMMUNICATIONS MODULE ===== */
   const COMMS_MESSAGES_KEY = "comms-messages";
   const ADMISSION_INQUIRIES_KEY = "admission-inquiries";
@@ -13159,8 +13447,8 @@
     renderWebsiteGallery(document.getElementById('websiteGalleryBody'));
   }
 
-  const ACCT_TAB_PERM_KEYS = { overview:'accounting_overview', income:'accounting_income', expense:'accounting_expenses', segments:'accounting_segments', categories:'accounting_categories' };
-  const ACCT_TABS = ['overview','income','expense','segments','categories'];
+  const ACCT_TAB_PERM_KEYS = { overview:'accounting_overview', income:'accounting_income', expense:'accounting_expenses', segments:'accounting_segments', categories:'accounting_categories', chartofaccounts:'accounting_chartofaccounts', journal:'accounting_journal', bank:'accounting_bank', assets:'accounting_assets', budget:'accounting_budget' };
+  const ACCT_TABS = ['overview','income','expense','segments','categories','chartofaccounts','journal','bank','assets','budget'];
   function initAccountingView(){
     const accessibleTabs = ACCT_TABS.filter(t => getAccountingTabAccess(currentUser.role, ACCT_TAB_PERM_KEYS[t]));
     ACCT_TABS.forEach(t => {
@@ -13189,6 +13477,11 @@
     if(accountingTab === 'expense') return renderAcctExpenseTab(body);
     if(accountingTab === 'segments') return renderAcctSegmentsTab(body);
     if(accountingTab === 'categories') return renderAcctCategoriesTab(body);
+    if(accountingTab === 'chartofaccounts') return renderAcctChartTab(body);
+    if(accountingTab === 'journal') return renderAcctJournalTab(body);
+    if(accountingTab === 'bank') return renderAcctBankTab(body);
+    if(accountingTab === 'assets') return renderAcctAssetsTab(body);
+    if(accountingTab === 'budget') return renderAcctBudgetTab(body);
   }
 
   /* --- Overview: cash position + recent activity ---
@@ -13310,6 +13603,7 @@
             <select id="acctIncMode" onchange="onAcctModeChange('acctIncMode','acctIncRefField')"><option>Cash</option><option>Bank Transfer</option><option>UPI</option><option>Cheque</option><option>Card</option><option>Online</option></select>
           </div>
           <div class="f-field" id="acctIncRefField" style="display:none;"><label>Reference / Cheque No.</label><input type="text" id="acctIncRef" placeholder="e.g. Cheque no. or UTR"></div>
+          <div class="f-field"><label>Deposited Into</label><select id="acctIncBankAccount"><option value="">(Auto — by Payment Mode)</option>${acctBankAccounts.filter(b=>b.active!==false).map(b => `<option value="${b.id}">${b.name}</option>`).join('')}</select></div>
           <div class="f-field full"><label>Description / Narration</label><input type="text" id="acctIncDesc" placeholder="Optional notes about this income"></div>
         </div>
         <button class="btn btn-primary" onclick="saveIncomeVoucher()">Save Income Voucher</button>
@@ -13352,6 +13646,7 @@
     const party = document.getElementById('acctIncParty').value.trim();
     const mode = document.getElementById('acctIncMode').value;
     const referenceNo = document.getElementById('acctIncRef') ? document.getElementById('acctIncRef').value.trim() : '';
+    const bankAccountId = document.getElementById('acctIncBankAccount').value;
     const description = document.getElementById('acctIncDesc').value.trim();
     if(!date){ showToast('Set a date.'); return; }
     if(amount <= 0){ showToast('Enter an amount.'); return; }
@@ -13362,7 +13657,7 @@
       showToast("Could not get a voucher number from the server (" + e.message + ") — not saved. Try again once you're back online.");
       return;
     }
-    acctIncome.push({ id:'inc_'+Date.now(), voucherNo, date, category, costCenter, amount, party, mode, referenceNo, description, addedBy:currentUser.name, voided:false });
+    acctIncome.push({ id:'inc_'+Date.now(), voucherNo, date, category, costCenter, amount, party, mode, referenceNo, bankAccountId, description, addedBy:currentUser.name, voided:false });
     await storageSet(ACCT_INCOME_KEY, acctIncome);
     renderDashboard();
     renderAcctIncomeTab(document.getElementById('accountingBody'));
@@ -13403,6 +13698,7 @@
             <select id="acctExpMode" onchange="onAcctModeChange('acctExpMode','acctExpRefField')"><option>Cash</option><option>Bank Transfer</option><option>UPI</option><option>Cheque</option><option>Card</option><option>Online</option></select>
           </div>
           <div class="f-field" id="acctExpRefField" style="display:none;"><label>Reference / Cheque No.</label><input type="text" id="acctExpRef" placeholder="e.g. Cheque no. or UTR"></div>
+          <div class="f-field"><label>Paid From</label><select id="acctExpBankAccount"><option value="">(Auto — by Payment Mode)</option>${acctBankAccounts.filter(b=>b.active!==false).map(b => `<option value="${b.id}">${b.name}</option>`).join('')}</select></div>
           <div class="f-field full"><label>Description / Narration</label><input type="text" id="acctExpDesc" placeholder="Optional notes about this expense"></div>
         </div>
         <button class="btn btn-primary" onclick="saveExpenseVoucher()">Save Expense Voucher</button>
@@ -13435,6 +13731,7 @@
     const party = document.getElementById('acctExpParty').value.trim();
     const mode = document.getElementById('acctExpMode').value;
     const referenceNo = document.getElementById('acctExpRef') ? document.getElementById('acctExpRef').value.trim() : '';
+    const bankAccountId = document.getElementById('acctExpBankAccount').value;
     const description = document.getElementById('acctExpDesc').value.trim();
     if(!date){ showToast('Set a date.'); return; }
     if(amount <= 0){ showToast('Enter an amount.'); return; }
@@ -13445,7 +13742,7 @@
       showToast("Could not get a voucher number from the server (" + e.message + ") — not saved. Try again once you're back online.");
       return;
     }
-    acctExpenses.push({ id:'exp_'+Date.now(), voucherNo, date, category, costCenter, amount, party, mode, referenceNo, description, addedBy:currentUser.name, voided:false });
+    acctExpenses.push({ id:'exp_'+Date.now(), voucherNo, date, category, costCenter, amount, party, mode, referenceNo, bankAccountId, description, addedBy:currentUser.name, voided:false });
     await storageSet(ACCT_EXPENSES_KEY, acctExpenses);
     renderDashboard();
     renderAcctExpenseTab(document.getElementById('accountingBody'));
@@ -13697,6 +13994,420 @@
     }
     renderDashboard();
     showToast('Voucher ' + v.voucherNo + ' voided.');
+  }
+
+  /* ===== Chart of Accounts tab ===== */
+  function renderAcctChartTab(body){
+    const canCreate = getAccountingTabAccess(currentUser.role, 'accounting_chartofaccounts', 'create');
+    const canDelete = getAccountingTabAccess(currentUser.role, 'accounting_chartofaccounts', 'delete');
+    const ledger = acctBuildLedger();
+    const coa = getChartOfAccounts();
+    const groups = ['Assets','Liabilities','Equity','Income','Expense'];
+    const byGroup = {}; groups.forEach(g => byGroup[g] = []);
+    coa.forEach(acct => {
+      const rows = ledger[acct.key] || [];
+      const bal = acctBalanceFromRows(rows, acct.type);
+      byGroup[acct.group].push({ acct, bal, count: rows.length });
+    });
+    body.innerHTML = `
+      <p style="font-size:0.85rem; color:var(--ink-soft); margin-bottom:16px; max-width:760px;">Every account the school's books use, grouped the way a proper Chart of Accounts is — Assets, Liabilities, Equity, Income and Expense — with each account's live balance. Bank &amp; Cash accounts are managed under <b>Bank &amp; Reconciliation</b>, Fixed Assets under <b>Fixed Assets</b>, and Income/Expense categories under <b>Categories</b>. Add any other Asset, Liability or Equity account here — a bank loan, caution deposits held for students, a corpus/capital fund, and so on.</p>
+      ${groups.map(g => `
+        <div class="dash-section-title"><div><h3>${g}</h3></div></div>
+        <div class="table-wrap" style="margin-bottom:24px;">
+          <table><thead><tr><th>Account</th><th>Type</th><th>Entries</th><th style="text-align:right;">Balance</th></tr></thead>
+          <tbody>
+          ${byGroup[g].length ? byGroup[g].map(({acct,bal,count}) => `<tr${acct.active===false?' style="opacity:0.5;"':''}><td class="name-cell">${acct.name}${acct.active===false?' <span class="pill" style="font-size:0.6rem;">Inactive</span>':''}</td><td>${acct.sub}</td><td>${count}</td><td style="text-align:right; font-weight:600; color:${bal.balance>=0?'#0f6a63':'var(--magenta)'};">${fmtMoney(Math.abs(bal.balance))} ${bal.normalDebit ? (bal.balance<0?'Cr':'Dr') : (bal.balance<0?'Dr':'Cr')}</td></tr>`).join('') : `<tr><td colspan="4"><div class="empty-state"><b>No ${g.toLowerCase()} accounts yet</b></div></td></tr>`}
+          </tbody></table>
+        </div>
+      `).join('')}
+      ${canCreate ? `
+      <div class="profile-card" style="max-width:640px; margin-bottom:20px;">
+        <h4>➕ Add Other Account (Asset / Liability / Equity)</h4>
+        <div class="form-grid" style="margin-bottom:14px;">
+          <div class="f-field full"><label>Account Name</label><input type="text" id="acctOLName" placeholder="e.g. Bank Loan — SBI, Corpus Fund, Caution Deposits Payable"></div>
+          <div class="f-field"><label>Type</label><select id="acctOLType"><option>Asset</option><option>Liability</option><option>Equity</option></select></div>
+          <div class="f-field"><label>Opening Balance (₹)</label><input type="number" id="acctOLOpening" min="0" placeholder="0"></div>
+          <div class="f-field"><label>Opening Date</label><input type="date" id="acctOLOpeningDate" value="${acctToday()}"></div>
+        </div>
+        <button class="btn btn-primary" onclick="saveAcctOtherLedger()">Add Account</button>
+      </div>` : ''}
+      <h4 style="margin-bottom:10px;">Other Accounts (${acctOtherLedgers.length})</h4>
+      <div class="table-wrap">
+        <table><thead><tr><th>Account</th><th>Type</th><th>Opening Balance</th><th></th></tr></thead>
+        <tbody>
+        ${acctOtherLedgers.length ? acctOtherLedgers.map(l => `<tr${l.active===false?' style="opacity:0.5;"':''}><td class="name-cell">${l.name}</td><td>${l.type}</td><td>${fmtMoney(l.openingBalance||0)}</td><td style="white-space:nowrap;">${canDelete ? `<button class="btn-edit-text" onclick="toggleAcctOtherLedgerActive('${l.id}')">${l.active===false?'Reactivate':'Deactivate'}</button> <button class="btn-danger-text" onclick="deleteAcctOtherLedger('${l.id}')">Delete</button>` : ''}</td></tr>`).join('') : `<tr><td colspan="4"><div class="empty-state"><b>No other accounts yet</b></div></td></tr>`}
+        </tbody></table>
+      </div>
+    `;
+  }
+  async function saveAcctOtherLedger(){
+    const name = document.getElementById('acctOLName').value.trim();
+    const type = document.getElementById('acctOLType').value;
+    const openingBalance = Number(document.getElementById('acctOLOpening').value) || 0;
+    const openingDate = document.getElementById('acctOLOpeningDate').value || acctToday();
+    if(!name){ showToast('Enter an account name.'); return; }
+    acctOtherLedgers.push({ id:'ledger_'+Date.now(), name, type, openingBalance, openingDate, active:true });
+    await storageSet(ACCT_OTHER_LEDGERS_KEY, acctOtherLedgers);
+    showToast('Account added.');
+    renderAcctChartTab(document.getElementById('accountingBody'));
+  }
+  async function toggleAcctOtherLedgerActive(id){
+    const l = acctOtherLedgers.find(x => x.id === id); if(!l) return;
+    l.active = l.active === false ? true : false;
+    await storageSet(ACCT_OTHER_LEDGERS_KEY, acctOtherLedgers);
+    renderAcctChartTab(document.getElementById('accountingBody'));
+  }
+  async function deleteAcctOtherLedger(id){
+    const inUse = acctAllPostings().some(r => r.key === 'ledger:'+id && r.source !== 'Opening');
+    if(inUse){ showToast("Can't delete — this account has journal entries against it. Deactivate it instead."); return; }
+    if(!await showConfirmDialog('Delete this account? This cannot be undone.')) return;
+    acctOtherLedgers = acctOtherLedgers.filter(x => x.id !== id);
+    await storageSet(ACCT_OTHER_LEDGERS_KEY, acctOtherLedgers);
+    showToast('Account deleted.');
+    renderAcctChartTab(document.getElementById('accountingBody'));
+  }
+
+  /* ===== Journal Vouchers tab ===== */
+  let jvDraftLines = [];
+  let acctJournalSearch = '';
+  function jvBlankLine(){ return { accountKey:'', debit:0, credit:0 }; }
+  function ensureJvDraft(){ if(jvDraftLines.length < 2) jvDraftLines = [jvBlankLine(), jvBlankLine()]; }
+  function syncJvLinesFromInputs(){
+    const rows = document.querySelectorAll('.jv-line-row');
+    if(!rows.length) return;
+    jvDraftLines = Array.from(rows).map(row => ({
+      accountKey: row.querySelector('.jv-line-account').value,
+      debit: Number(row.querySelector('.jv-line-debit').value) || 0,
+      credit: Number(row.querySelector('.jv-line-credit').value) || 0,
+    }));
+  }
+  function renderAcctJournalTab(body){
+    ensureJvDraft();
+    const canCreate = getAccountingTabAccess(currentUser.role, 'accounting_journal', 'create');
+    const canVoid = getAccountingTabAccess(currentUser.role, 'accounting_journal', 'delete');
+    const coa = getChartOfAccounts().filter(a => a.active !== false);
+    const totalDebit = jvDraftLines.reduce((s,l)=>s+(Number(l.debit)||0),0);
+    const totalCredit = jvDraftLines.reduce((s,l)=>s+(Number(l.credit)||0),0);
+    const q = acctJournalSearch.toLowerCase();
+    const filtered = acctJournalVouchers.filter(j => !q || (j.narration||'').toLowerCase().includes(q) || j.voucherNo.toLowerCase().includes(q)).sort((a,b) => (b.date||'').localeCompare(a.date||''));
+    body.innerHTML = `
+      ${canCreate ? `
+      <div class="profile-card" style="margin-bottom:24px;">
+        <h4>📒 New Journal Voucher</h4>
+        <p style="font-size:0.78rem; color:var(--ink-soft); margin:6px 0 14px;">For adjustments, opening entries, transfers between bank accounts (use type Contra), or anything that doesn't fit a simple Income/Expense voucher. Every line needs either a Debit or a Credit, and the voucher can only be saved once total Debit equals total Credit. A voucher number is assigned automatically when you save.</p>
+        <div class="form-grid" style="margin-bottom:14px;">
+          <div class="f-field"><label>Date</label><input type="date" id="jvDate" value="${acctToday()}"></div>
+          <div class="f-field"><label>Type</label><select id="jvType"><option>Journal</option><option>Contra</option></select></div>
+          <div class="f-field full"><label>Narration</label><input type="text" id="jvNarration" placeholder="e.g. Transfer from Cash to SBI Bank Account"></div>
+        </div>
+        <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:6px;">
+          <h4 style="margin:0;">Lines</h4>
+          <button class="btn btn-primary btn-sm" onclick="addJvLine()">+ Add Line</button>
+        </div>
+        <div class="table-wrap" style="overflow-x:auto; margin-bottom:10px;">
+          <table style="min-width:560px;"><thead><tr><th>Account</th><th style="width:130px;">Debit (₹)</th><th style="width:130px;">Credit (₹)</th><th></th></tr></thead>
+          <tbody>
+          ${jvDraftLines.map((l,i) => `<tr class="jv-line-row">
+            <td><select class="input jv-line-account" style="width:100%;">
+              <option value="">Select account...</option>
+              ${coa.map(a => `<option value="${a.key}" ${l.accountKey===a.key?'selected':''}>${a.group} — ${a.name}</option>`).join('')}
+            </select></td>
+            <td><input type="number" class="input jv-line-debit" min="0" value="${l.debit||''}"></td>
+            <td><input type="number" class="input jv-line-credit" min="0" value="${l.credit||''}"></td>
+            <td>${jvDraftLines.length > 2 ? `<button class="btn-danger-text" onclick="removeJvLine(${i})">🗑️</button>` : ''}</td>
+          </tr>`).join('')}
+          </tbody>
+          <tfoot><tr style="font-weight:700;"><td>Total</td><td>${fmtMoney(totalDebit)}</td><td>${fmtMoney(totalCredit)}</td><td></td></tr></tfoot>
+          </table>
+        </div>
+        <p style="font-size:0.78rem; color:var(--ink-soft); margin-bottom:12px;">Totals above reflect the lines as of the last Add/Remove — the exact check happens when you save.</p>
+        <button class="btn btn-primary" onclick="saveJournalVoucher()">Save Journal Voucher</button>
+      </div>` : ''}
+
+      <h4 style="margin-bottom:10px;">Journal Vouchers (${acctJournalVouchers.length})</h4>
+      <input class="input" style="max-width:280px; margin-bottom:12px;" placeholder="Search vouchers..." value="${acctJournalSearch}" oninput="acctJournalSearch=this.value; renderAcctJournalTab(document.getElementById('accountingBody'));">
+      <div class="table-wrap">
+        <table><thead><tr><th>Voucher No.</th><th>Date</th><th>Type</th><th>Narration</th><th>Amount</th><th></th></tr></thead>
+        <tbody>
+        ${filtered.length ? filtered.map(j => {
+          const amt = (j.lines||[]).reduce((s,l)=>s+(Number(l.debit)||0),0);
+          return `<tr${j.voided?' style="opacity:0.55; text-decoration:line-through;"':''}><td>${j.voucherNo}</td><td>${j.date}</td><td>${j.type||'Journal'}</td><td>${j.narration||'—'}</td><td style="font-weight:600;">${fmtMoney(amt)}</td><td style="text-decoration:none; white-space:nowrap;">${canVoid && !j.voided?`<button class="btn-danger-text" onclick="voidJournalVoucher('${j.id}')">Void</button>`:''}${j.voided?` <span class="pill" style="font-size:0.62rem;" title="${escapeHtml(j.voidReason||'')}">Voided</span>`:''}</td></tr>`;
+        }).join('') : `<tr><td colspan="6"><div class="empty-state"><b>No journal vouchers yet${acctJournalSearch?' match your search':''}</b></div></td></tr>`}
+        </tbody></table>
+      </div>
+    `;
+  }
+  function addJvLine(){ syncJvLinesFromInputs(); jvDraftLines.push(jvBlankLine()); renderAcctJournalTab(document.getElementById('accountingBody')); }
+  function removeJvLine(i){ syncJvLinesFromInputs(); jvDraftLines.splice(i,1); renderAcctJournalTab(document.getElementById('accountingBody')); }
+  async function saveJournalVoucher(){
+    syncJvLinesFromInputs();
+    const date = document.getElementById('jvDate').value;
+    const type = document.getElementById('jvType').value;
+    const narration = document.getElementById('jvNarration').value.trim();
+    const lines = jvDraftLines.filter(l => l.accountKey && (l.debit||l.credit));
+    if(!date){ showToast('Set a date.'); return; }
+    if(lines.length < 2){ showToast('Add at least two lines with an account and an amount.'); return; }
+    if(lines.some(l => l.debit>0 && l.credit>0)){ showToast('Each line can only be a Debit or a Credit, not both.'); return; }
+    const totalDebit = lines.reduce((s,l)=>s+(Number(l.debit)||0),0);
+    const totalCredit = lines.reduce((s,l)=>s+(Number(l.credit)||0),0);
+    if(Math.round(totalDebit*100) !== Math.round(totalCredit*100) || totalDebit <= 0){ showToast(`Total Debit (${fmtMoney(totalDebit)}) must equal total Credit (${fmtMoney(totalCredit)}).`); return; }
+    let voucherNo;
+    try{ voucherNo = await issueDocNumber('journal_voucher'); }
+    catch(e){ showToast("Could not get a voucher number from the server (" + e.message + ") — not saved. Try again once you're back online."); return; }
+    acctJournalVouchers.push({ id:'jv_'+Date.now(), voucherNo, date, type, narration, lines, createdBy:currentUser.name, voided:false });
+    await storageSet(ACCT_JOURNAL_KEY, acctJournalVouchers);
+    jvDraftLines = [];
+    renderDashboard();
+    showToast('Journal Voucher ' + voucherNo + ' saved.');
+    renderAcctJournalTab(document.getElementById('accountingBody'));
+  }
+  async function voidJournalVoucher(id){
+    const j = acctJournalVouchers.find(x => x.id === id);
+    if(!j || j.voided) return;
+    const reason = prompt(`Void voucher ${j.voucherNo}?\n\nEnter a reason (this voucher stays visible, struck through, for audit — it will not be edited or deleted):`);
+    if(reason === null) return;
+    if(!reason.trim()){ showToast('A reason is required to void a voucher.'); return; }
+    j.voided = true; j.voidReason = reason.trim(); j.voidedBy = currentUser.name; j.voidedAt = new Date().toISOString();
+    await storageSet(ACCT_JOURNAL_KEY, acctJournalVouchers);
+    renderDashboard();
+    showToast('Voucher ' + j.voucherNo + ' voided.');
+    renderAcctJournalTab(document.getElementById('accountingBody'));
+  }
+
+  /* ===== Bank Accounts & Reconciliation tab ===== */
+  let acctReconAccountId = '';
+  function renderAcctBankTab(body){
+    const canCreate = getAccountingTabAccess(currentUser.role, 'accounting_bank', 'create');
+    const canDelete = getAccountingTabAccess(currentUser.role, 'accounting_bank', 'delete');
+    if((!acctReconAccountId || !acctBankAccounts.some(b=>b.id===acctReconAccountId)) && acctBankAccounts.length) acctReconAccountId = acctBankAccounts[0].id;
+    const ledger = acctBuildLedger();
+    body.innerHTML = `
+      ${canCreate ? `
+      <div class="profile-card" style="max-width:640px; margin-bottom:24px;">
+        <h4>➕ Add Bank / Cash Account</h4>
+        <div class="form-grid" style="margin-bottom:14px;">
+          <div class="f-field full"><label>Account Name</label><input type="text" id="acctBankName" placeholder="e.g. Bank Account — SBI Current A/c"></div>
+          <div class="f-field"><label>Type</label><select id="acctBankType"><option>Bank</option><option>Cash</option></select></div>
+          <div class="f-field"><label>Bank Name</label><input type="text" id="acctBankBankName" placeholder="e.g. State Bank of India"></div>
+          <div class="f-field"><label>Account Number</label><input type="text" id="acctBankAccNo" placeholder="Optional"></div>
+          <div class="f-field"><label>IFSC</label><input type="text" id="acctBankIfsc" placeholder="Optional"></div>
+          <div class="f-field"><label>Opening Balance (₹)</label><input type="number" id="acctBankOpening" min="0" placeholder="0"></div>
+          <div class="f-field"><label>Opening Date</label><input type="date" id="acctBankOpeningDate" value="${acctToday()}"></div>
+        </div>
+        <button class="btn btn-primary" onclick="saveAcctBankAccount()">Add Account</button>
+      </div>` : ''}
+
+      <h4 style="margin-bottom:10px;">Bank &amp; Cash Accounts (${acctBankAccounts.length})</h4>
+      <div class="table-wrap" style="margin-bottom:28px;">
+        <table><thead><tr><th>Account</th><th>Type</th><th>Bank</th><th>A/c No.</th><th style="text-align:right;">Balance</th><th></th></tr></thead>
+        <tbody>
+        ${acctBankAccounts.map(b => {
+          const bal = acctBalanceFromRows(ledger['bank:'+b.id]||[], 'Asset');
+          return `<tr${b.active===false?' style="opacity:0.5;"':''}><td class="name-cell">${b.name}</td><td>${b.type}</td><td>${b.bankName||'—'}</td><td>${b.accountNo||'—'}</td><td style="text-align:right; font-weight:600; color:${bal.balance>=0?'#0f6a63':'var(--magenta)'};">${fmtMoney(bal.balance)}</td><td style="white-space:nowrap;">${canDelete && acctBankAccounts.filter(x=>x.active!==false).length>1 ? `<button class="btn-edit-text" onclick="toggleAcctBankActive('${b.id}')">${b.active===false?'Reactivate':'Deactivate'}</button>` : ''}</td></tr>`;
+        }).join('')}
+        </tbody></table>
+      </div>
+
+      <div class="dash-section-title"><div><h3>Bank Reconciliation</h3></div></div>
+      <p style="font-size:0.8rem; color:var(--ink-soft); margin-bottom:12px; max-width:700px;">Tick off every transaction that has actually cleared on your bank statement. The Reconciled Balance should match your bank statement's closing balance once everything on it is ticked — anything left unticked is still in transit (a cheque issued but not yet presented, for example).</p>
+      <div class="f-field" style="max-width:320px; margin-bottom:16px;">
+        <label>Account</label>
+        <select id="acctReconAccountSel" onchange="acctReconAccountId=this.value; renderAcctBankTab(document.getElementById('accountingBody'));">
+          ${acctBankAccounts.map(b => `<option value="${b.id}" ${acctReconAccountId===b.id?'selected':''}>${b.name}</option>`).join('')}
+        </select>
+      </div>
+      ${renderAcctReconciliationBody(acctReconAccountId, ledger)}
+    `;
+  }
+  function renderAcctReconciliationBody(bankId, ledger){
+    const bank = acctBankAccounts.find(b => b.id === bankId);
+    if(!bank) return `<div class="empty-state"><b>Add a bank/cash account above first.</b></div>`;
+    const rows = (ledger['bank:'+bankId]||[]).slice().sort((a,b) => (a.date||'').localeCompare(b.date||''));
+    let reconciledBal = 0, ledgerBal = 0;
+    const trs = rows.map(r => {
+      const rid = acctRowId(r);
+      const reconciled = !!acctReconciled[rid];
+      const net = r.debit - r.credit;
+      ledgerBal += net;
+      if(reconciled) reconciledBal += net;
+      return `<tr><td><input type="checkbox" ${reconciled?'checked':''} onchange="toggleAcctReconciledRow('${rid.replace(/'/g,"\\'")}')"></td><td>${r.date}</td><td>${r.narration}</td><td>${r.source}</td><td style="text-align:right; color:${net>=0?'#0f6a63':'var(--magenta)'};">${net>=0?'+':''}${fmtMoney(net)}</td></tr>`;
+    }).join('');
+    const statementBal = bank.lastStatementBalance != null ? Number(bank.lastStatementBalance) : null;
+    const diff = statementBal != null ? Math.round((statementBal - reconciledBal)*100)/100 : null;
+    return `
+      <div class="fee-summary-row" style="margin-bottom:16px;">
+        <div class="fee-sum-card"><b>${fmtMoney(ledgerBal)}</b><span>Ledger Balance</span></div>
+        <div class="fee-sum-card"><b>${fmtMoney(reconciledBal)}</b><span>Reconciled Balance</span></div>
+        <div class="fee-sum-card"><b style="color:${diff===0?'#0f6a63':(diff==null?'inherit':'var(--magenta)')};">${statementBal!=null?fmtMoney(diff):'—'}</b><span>Difference vs Statement</span></div>
+      </div>
+      <div style="display:flex; gap:8px; align-items:flex-end; margin-bottom:14px;">
+        <div class="f-field"><label>Bank Statement Closing Balance (₹)</label><input type="number" id="acctStatementBal" value="${bank.lastStatementBalance||''}" placeholder="Enter to compare"></div>
+        <button class="btn btn-ghost btn-sm" onclick="saveAcctStatementBalance('${bankId}')">Save</button>
+      </div>
+      <div class="table-wrap">
+        <table><thead><tr><th style="width:40px;">✓</th><th>Date</th><th>Narration</th><th>Source</th><th style="text-align:right;">Amount</th></tr></thead>
+        <tbody>${rows.length ? trs : `<tr><td colspan="5"><div class="empty-state"><b>No transactions on this account yet</b></div></td></tr>`}</tbody></table>
+      </div>
+    `;
+  }
+  async function saveAcctBankAccount(){
+    const name = document.getElementById('acctBankName').value.trim();
+    const type = document.getElementById('acctBankType').value;
+    const bankName = document.getElementById('acctBankBankName').value.trim();
+    const accountNo = document.getElementById('acctBankAccNo').value.trim();
+    const ifsc = document.getElementById('acctBankIfsc').value.trim();
+    const openingBalance = Number(document.getElementById('acctBankOpening').value) || 0;
+    const openingDate = document.getElementById('acctBankOpeningDate').value || acctToday();
+    if(!name){ showToast('Enter an account name.'); return; }
+    acctBankAccounts.push({ id:'bnk_'+Date.now(), name, type, bankName, accountNo, ifsc, openingBalance, openingDate, active:true });
+    await storageSet(ACCT_BANK_ACCOUNTS_KEY, acctBankAccounts);
+    showToast('Account added.');
+    renderAcctBankTab(document.getElementById('accountingBody'));
+  }
+  async function toggleAcctBankActive(id){
+    const b = acctBankAccounts.find(x => x.id === id); if(!b) return;
+    b.active = b.active === false ? true : false;
+    await storageSet(ACCT_BANK_ACCOUNTS_KEY, acctBankAccounts);
+    renderAcctBankTab(document.getElementById('accountingBody'));
+  }
+  async function toggleAcctReconciledRow(rowId){
+    await toggleAcctReconciled(rowId);
+    renderAcctBankTab(document.getElementById('accountingBody'));
+  }
+  async function saveAcctStatementBalance(bankId){
+    const b = acctBankAccounts.find(x => x.id === bankId); if(!b) return;
+    const val = document.getElementById('acctStatementBal').value;
+    b.lastStatementBalance = val === '' ? null : Number(val);
+    b.lastStatementDate = acctToday();
+    await storageSet(ACCT_BANK_ACCOUNTS_KEY, acctBankAccounts);
+    showToast('Statement balance saved.');
+    renderAcctBankTab(document.getElementById('accountingBody'));
+  }
+
+  /* ===== Fixed Assets tab ===== */
+  function renderAcctAssetsTab(body){
+    const canCreate = getAccountingTabAccess(currentUser.role, 'accounting_assets', 'create');
+    const canDelete = getAccountingTabAccess(currentUser.role, 'accounting_assets', 'delete');
+    const totalCost = acctFixedAssets.reduce((s,a)=>s+(Number(a.purchaseCost)||0),0);
+    const totalDep = acctFixedAssets.reduce((s,a)=>s+acctAccumulatedDepreciation(a, acctToday()),0);
+    const totalBook = totalCost - totalDep;
+    body.innerHTML = `
+      <div class="fee-summary-row" style="margin-bottom:20px;">
+        <div class="fee-sum-card"><b>${fmtMoney(totalCost)}</b><span>Total Asset Cost</span></div>
+        <div class="fee-sum-card"><b style="color:var(--magenta);">${fmtMoney(totalDep)}</b><span>Accumulated Depreciation</span></div>
+        <div class="fee-sum-card"><b>${fmtMoney(totalBook)}</b><span>Current Book Value</span></div>
+      </div>
+      ${canCreate ? `
+      <div class="profile-card" style="max-width:680px; margin-bottom:24px;">
+        <h4>🏢 Add Fixed Asset</h4>
+        <p style="font-size:0.78rem; color:var(--ink-soft); margin:6px 0 14px;">Buildings, furniture, computers, lab equipment, vehicles — anything the school owns that loses value over time. Depreciation is calculated automatically using the straight-line method (Cost − Salvage Value) ÷ Useful Life, prorated by how long you've owned it.</p>
+        <div class="form-grid" style="margin-bottom:14px;">
+          <div class="f-field full"><label>Asset Name</label><input type="text" id="assetName" placeholder="e.g. Computer Lab — 20 Desktops"></div>
+          <div class="f-field"><label>Category</label><input type="text" id="assetCategory" placeholder="e.g. IT Equipment, Furniture, Vehicle, Building"></div>
+          <div class="f-field"><label>Purchase Date</label><input type="date" id="assetPurchaseDate" value="${acctToday()}"></div>
+          <div class="f-field"><label>Purchase Cost (₹)</label><input type="number" id="assetCost" min="0" placeholder="0"></div>
+          <div class="f-field"><label>Salvage Value (₹)</label><input type="number" id="assetSalvage" min="0" placeholder="0"></div>
+          <div class="f-field"><label>Useful Life (Years)</label><input type="number" id="assetLife" min="1" placeholder="e.g. 5"></div>
+        </div>
+        <button class="btn btn-primary" onclick="saveAcctFixedAsset()">Add Asset</button>
+      </div>` : ''}
+      <h4 style="margin-bottom:10px;">Fixed Assets Register (${acctFixedAssets.length})</h4>
+      <div class="table-wrap">
+        <table><thead><tr><th>Asset</th><th>Category</th><th>Purchase Date</th><th>Cost</th><th>Acc. Depreciation</th><th>Book Value</th><th></th></tr></thead>
+        <tbody>
+        ${acctFixedAssets.length ? acctFixedAssets.map(a => {
+          const dep = acctAccumulatedDepreciation(a, acctToday());
+          const book = acctAssetBookValue(a, acctToday());
+          return `<tr${a.active===false?' style="opacity:0.5;"':''}><td class="name-cell">${a.name}${a.active===false?' <span class="pill" style="font-size:0.6rem;">Disposed</span>':''}</td><td>${a.category||'—'}</td><td>${a.purchaseDate||'—'}</td><td>${fmtMoney(a.purchaseCost)}</td><td style="color:var(--magenta);">${fmtMoney(dep)}</td><td style="font-weight:600;">${fmtMoney(book)}</td><td style="white-space:nowrap;">${canDelete && a.active!==false ? `<button class="btn-danger-text" onclick="disposeAcctFixedAsset('${a.id}')">Mark Disposed</button>` : ''}</td></tr>`;
+        }).join('') : `<tr><td colspan="7"><div class="empty-state"><b>No fixed assets recorded yet</b></div></td></tr>`}
+        </tbody></table>
+      </div>
+    `;
+  }
+  async function saveAcctFixedAsset(){
+    const name = document.getElementById('assetName').value.trim();
+    const category = document.getElementById('assetCategory').value.trim();
+    const purchaseDate = document.getElementById('assetPurchaseDate').value;
+    const purchaseCost = Number(document.getElementById('assetCost').value) || 0;
+    const salvageValue = Number(document.getElementById('assetSalvage').value) || 0;
+    const usefulLifeYears = Number(document.getElementById('assetLife').value) || 0;
+    if(!name){ showToast('Enter an asset name.'); return; }
+    if(purchaseCost <= 0){ showToast('Enter the purchase cost.'); return; }
+    if(usefulLifeYears <= 0){ showToast('Enter the useful life in years.'); return; }
+    acctFixedAssets.push({ id:'asset_'+Date.now(), name, category, purchaseDate, purchaseCost, salvageValue, usefulLifeYears, active:true, addedBy:currentUser.name });
+    await storageSet(ACCT_FIXED_ASSETS_KEY, acctFixedAssets);
+    showToast('Asset added.');
+    renderDashboard();
+    renderAcctAssetsTab(document.getElementById('accountingBody'));
+  }
+  async function disposeAcctFixedAsset(id){
+    const a = acctFixedAssets.find(x => x.id === id); if(!a) return;
+    if(!await showConfirmDialog(`Mark "${a.name}" as disposed? It will stop accruing depreciation and drop off the active Balance Sheet, but stays here for the record.`)) return;
+    a.active = false;
+    a.disposedDate = acctToday();
+    await storageSet(ACCT_FIXED_ASSETS_KEY, acctFixedAssets);
+    renderDashboard();
+    showToast('Asset marked disposed.');
+    renderAcctAssetsTab(document.getElementById('accountingBody'));
+  }
+
+  /* ===== Budget tab ===== */
+  function renderAcctBudgetTab(body){
+    const canCreate = getAccountingTabAccess(currentUser.role, 'accounting_budget', 'create');
+    const canDelete = getAccountingTabAccess(currentUser.role, 'accounting_budget', 'delete');
+    const coa = getChartOfAccounts().filter(a => (a.type==='Income'||a.type==='Expense') && a.active!==false);
+    const nextYear = Number(acctToday().slice(0,4)) + 1;
+    body.innerHTML = `
+      ${canCreate ? `
+      <div class="profile-card" style="max-width:680px; margin-bottom:24px;">
+        <h4>📅 Add Budget Line</h4>
+        <p style="font-size:0.78rem; color:var(--ink-soft); margin:6px 0 14px;">Set a budgeted amount for an Income or Expense account over a period (a term, a financial year, etc.) and compare it against what actually happened.</p>
+        <div class="form-grid" style="margin-bottom:14px;">
+          <div class="f-field full"><label>Label</label><input type="text" id="budgetLabel" placeholder="e.g. FY 2026-27"></div>
+          <div class="f-field"><label>Start Date</label><input type="date" id="budgetStart" value="${acctToday().slice(0,4)}-04-01"></div>
+          <div class="f-field"><label>End Date</label><input type="date" id="budgetEnd" value="${nextYear}-03-31"></div>
+          <div class="f-field"><label>Account</label><select id="budgetAccount">${coa.map(a => `<option value="${a.key}">${a.group} — ${a.name}</option>`).join('')}</select></div>
+          <div class="f-field"><label>Budgeted Amount (₹)</label><input type="number" id="budgetAmount" min="0" placeholder="0"></div>
+        </div>
+        <button class="btn btn-primary" onclick="saveAcctBudget()">Add Budget Line</button>
+      </div>` : ''}
+      <h4 style="margin-bottom:10px;">Budget vs Actual (${acctBudgets.length})</h4>
+      <div class="table-wrap">
+        <table><thead><tr><th>Label</th><th>Period</th><th>Account</th><th>Budgeted</th><th>Actual</th><th>Variance</th><th></th></tr></thead>
+        <tbody>
+        ${acctBudgets.length ? acctBudgets.map(b => {
+          const acct = coaAccountByKey(b.accountKey);
+          const actual = acctActualForAccountInRange(b.accountKey, b.startDate, b.endDate);
+          const variance = actual - (Number(b.budgetedAmount)||0);
+          const isExpense = acct && acct.type === 'Expense';
+          const overBudget = isExpense ? variance > 0 : variance < 0;
+          return `<tr><td>${b.label}</td><td>${b.startDate} to ${b.endDate}</td><td>${acct?acct.name:b.accountKey}</td><td>${fmtMoney(b.budgetedAmount)}</td><td>${fmtMoney(actual)}</td><td style="font-weight:600; color:${overBudget?'var(--magenta)':'#0f6a63'};">${variance>=0?'+':''}${fmtMoney(variance)}</td><td>${canDelete?`<button class="btn-danger-text" onclick="deleteAcctBudget('${b.id}')">Delete</button>`:''}</td></tr>`;
+        }).join('') : `<tr><td colspan="7"><div class="empty-state"><b>No budget lines yet</b></div></td></tr>`}
+        </tbody></table>
+      </div>
+    `;
+  }
+  async function saveAcctBudget(){
+    const label = document.getElementById('budgetLabel').value.trim();
+    const startDate = document.getElementById('budgetStart').value;
+    const endDate = document.getElementById('budgetEnd').value;
+    const accountKey = document.getElementById('budgetAccount').value;
+    const budgetedAmount = Number(document.getElementById('budgetAmount').value) || 0;
+    if(!label){ showToast('Enter a label.'); return; }
+    if(!startDate || !endDate){ showToast('Set both start and end dates.'); return; }
+    if(!accountKey){ showToast('Select an account.'); return; }
+    if(budgetedAmount <= 0){ showToast('Enter a budgeted amount.'); return; }
+    acctBudgets.push({ id:'budget_'+Date.now(), label, startDate, endDate, accountKey, budgetedAmount });
+    await storageSet(ACCT_BUDGETS_KEY, acctBudgets);
+    showToast('Budget line added.');
+    renderAcctBudgetTab(document.getElementById('accountingBody'));
+  }
+  async function deleteAcctBudget(id){
+    if(!await showConfirmDialog('Delete this budget line?')) return;
+    acctBudgets = acctBudgets.filter(x => x.id !== id);
+    await storageSet(ACCT_BUDGETS_KEY, acctBudgets);
+    showToast('Budget line deleted.');
+    renderAcctBudgetTab(document.getElementById('accountingBody'));
   }
 
   const HOSTEL_TAB_PERM_KEYS = { rooms:'hostel_rooms', allot:'hostel_allot', roster:'hostel_roster' };
@@ -20366,7 +21077,7 @@
       loadExamRoomConfigs(), loadExamHolidays(), loadReportTemplates(),
       loadAdminDownloads(), loadPendingApprovals(), loadInventory(),
       loadTimetable(), loadSyllabusHomework(), loadTransport(), loadLibrary(),
-      loadHostel(), loadAccounting(), loadComms(), loadStaff(),
+      loadHostel(), loadAccounting(), loadAccountingLedger(), loadComms(), loadStaff(),
       loadStaffPayroll(), loadSubjects(), loadCustomRoles(), loadStudents(),
       loadUsers(), loadBiometricStatus(),
     ]);
