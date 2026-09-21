@@ -10316,7 +10316,7 @@
         <div style="background:${style.bg}; border-left:5px solid ${style.color}; border-radius:10px; padding:10px 16px; margin-bottom:14px;">
           <h3 style="margin:0; color:${style.color}; font-family:'Baloo 2',cursive;">${cat} Reports</h3>
         </div>
-        <div style="display:grid; grid-template-columns:repeat(auto-fill, minmax(270px,1fr)); gap:16px; margin-bottom:28px;">
+        <div style="display:grid; grid-template-columns:repeat(auto-fill, minmax(270px,1fr)); gap:16px; margin-bottom:${cat==='Inventory'?'16px':'28px'};">
           ${REPORT_LIBRARY.filter(r => r.category===cat).map(r => `
             <div class="profile-card" style="border-top:4px solid ${style.color};">
               <div style="display:flex; align-items:center; gap:10px; margin-bottom:6px;">
@@ -10332,6 +10332,7 @@
             </div>
           `).join('')}
         </div>
+        ${cat==='Inventory' ? renderInvItemReportPanel(style) : ''}
       `; }).join('')}
 
       ${getReportCategoryAccess(currentUser.role, 'reports_marks') ? `
@@ -10365,7 +10366,7 @@
     `;
     updateReportScopeSummary();
   }
-  function onReportScopeChange(){ updateReportScopeSummary(); }
+  function onReportScopeChange(){ updateReportScopeSummary(); updateInvReportSummary(); }
   function updateReportScopeSummary(){
     const box = document.getElementById('reportScopeSummary');
     if(!box) return;
@@ -10456,6 +10457,152 @@
     if(rows.length === 0){ showToast('Nothing to report for this exam yet.'); return; }
     const title = names[kind] + ' — ' + exam.name;
     if(format === 'excel') exportRowsToExcel(kind+'_report.xlsx', names[kind], rows);
+    else exportRowsToPDF(title, '', rows);
+  }
+  /* --- Inventory Reports — By Item: who has purchased a specific product, how many,
+     and (the reverse) which scoped students haven't bought it yet. Answers "how many
+     students have purchased X" directly via the live summary line, plus three exportable
+     report variants with product / buyer-type / date-range conditions, on top of the
+     Class/Section/Student scope shared with the rest of the Report Library. --- */
+  function renderInvItemReportPanel(style){
+    return `
+      <div class="profile-card" style="max-width:600px; margin-bottom:28px; border-top:4px solid ${style.color};">
+        <h4>📦 Item Purchase Reports — By Product</h4>
+        <p style="font-size:0.8rem; color:var(--ink-soft); margin:8px 0 12px;">Pick a product to see who has purchased it and how many — the Class/Section/Student scope above still applies to student buyers.</p>
+        <div class="form-grid" style="margin-bottom:10px;">
+          <div class="f-field full">
+            <label>Product</label>
+            <select id="invReportItemSelect" onchange="updateInvReportSummary()">
+              <option value="">— Select a product —</option>
+              ${inventoryItems.slice().sort((a,b)=>(a.name||'').localeCompare(b.name||'')).map(it => `<option value="${it.id}">${it.name}${it.category?' ('+it.category+')':''}</option>`).join('')}
+            </select>
+          </div>
+          <div class="f-field">
+            <label>Buyer Type</label>
+            <select id="invReportBuyerType" onchange="updateInvReportSummary()">
+              <option value="">All Buyer Types</option>
+              <option value="Student">Student</option>
+              <option value="Staff">Staff</option>
+              <option value="Walk-in">Walk-in</option>
+            </select>
+          </div>
+          <div class="f-field"><label>From Date</label><input type="date" id="invReportFrom" onchange="updateInvReportSummary()"></div>
+          <div class="f-field"><label>To Date</label><input type="date" id="invReportTo" onchange="updateInvReportSummary()"></div>
+        </div>
+        <div id="invReportSummary" style="font-size:0.82rem; font-weight:600; color:var(--navy); margin-bottom:14px;">Pick a product above to see purchase stats.</div>
+        <div style="display:flex; flex-direction:column; gap:8px;">
+          <div style="display:flex; justify-content:space-between; align-items:center; flex-wrap:wrap; gap:6px;">
+            <span style="font-size:0.85rem;">Buyer List — every purchase transaction</span>
+            <div style="display:flex; gap:8px;"><button class="btn-edit-text" onclick="generateInvItemReport('buyers','excel')">Excel</button><button class="btn-edit-text" onclick="generateInvItemReport('buyers','pdf')">PDF</button></div>
+          </div>
+          <div style="display:flex; justify-content:space-between; align-items:center; flex-wrap:wrap; gap:6px;">
+            <span style="font-size:0.85rem;">Buyer Summary — unique buyers, qty &amp; spend each</span>
+            <div style="display:flex; gap:8px;"><button class="btn-edit-text" onclick="generateInvItemReport('summary','excel')">Excel</button><button class="btn-edit-text" onclick="generateInvItemReport('summary','pdf')">PDF</button></div>
+          </div>
+          <div style="display:flex; justify-content:space-between; align-items:center; flex-wrap:wrap; gap:6px;">
+            <span style="font-size:0.85rem;">Non-Buyers — active students who haven't purchased it yet</span>
+            <div style="display:flex; gap:8px;"><button class="btn-edit-text" onclick="generateInvItemReport('nonbuyers','excel')">Excel</button><button class="btn-edit-text" onclick="generateInvItemReport('nonbuyers','pdf')">PDF</button></div>
+          </div>
+        </div>
+      </div>
+    `;
+  }
+  function invReportFilteredSales(){
+    const itemSel = document.getElementById('invReportItemSelect');
+    const itemId = itemSel ? itemSel.value : '';
+    if(!itemId) return [];
+    const buyerTypeSel = document.getElementById('invReportBuyerType');
+    const buyerType = buyerTypeSel ? buyerTypeSel.value : '';
+    const fromEl = document.getElementById('invReportFrom');
+    const toEl = document.getElementById('invReportTo');
+    const from = fromEl ? fromEl.value : '';
+    const to = toEl ? toEl.value : '';
+    const scope = getReportScopeFilters();
+    const scopeActive = !!(scope.studentId || scope.className || scope.section);
+    return inventorySales.filter(s => {
+      if(s.itemId !== itemId) return false;
+      if(buyerType && s.buyerType !== buyerType) return false;
+      if(from && s.date < from) return false;
+      if(to && s.date > to) return false;
+      if(s.buyerType === 'Student'){
+        if(scope.studentId && s.studentId !== scope.studentId) return false;
+        if(scope.className || scope.section){
+          const st = students.find(x => x.id === s.studentId);
+          if(!st) return false;
+          if(scope.className && st.className !== scope.className) return false;
+          if(scope.section && st.section !== scope.section) return false;
+        }
+      } else if(scopeActive){
+        // A student-only scope (class/section/one student) is active, and this sale
+        // was to a Staff/Walk-in buyer who can't belong to any class — exclude it.
+        return false;
+      }
+      return true;
+    });
+  }
+  function invReportBuyerListRows(){
+    return invReportFilteredSales().slice().sort((a,b) => (a.date||'').localeCompare(b.date||'')).map(s => {
+      const st = s.buyerType==='Student' ? students.find(x=>x.id===s.studentId) : null;
+      return {
+        'Date': s.date, 'Buyer': st ? (st.firstName+' '+st.lastName) : (s.buyerName||s.buyerType),
+        'Buyer Type': s.buyerType, 'Class': st ? (st.className+' — '+st.section) : '—', 'Admission No': st ? st.admissionNo : '—',
+        'Qty': s.qty, 'Unit Price': s.unitPrice, 'Discount': s.discount||0, 'Total': s.totalAmount, 'Paid': s.paidAmount, 'Mode': s.mode||'', 'Sold By': s.soldBy||'',
+      };
+    });
+  }
+  function invReportBuyerSummaryRows(){
+    const byBuyer = {};
+    invReportFilteredSales().forEach(s => {
+      const st = s.buyerType==='Student' ? students.find(x=>x.id===s.studentId) : null;
+      const key = s.buyerType==='Student' ? ('student:'+s.studentId) : ('other:'+s.buyerType+':'+(s.buyerName||''));
+      if(!byBuyer[key]) byBuyer[key] = { name: st ? (st.firstName+' '+st.lastName) : (s.buyerName||s.buyerType), buyerType:s.buyerType, cls: st ? (st.className+' — '+st.section) : '—', admissionNo: st ? st.admissionNo : '—', qty:0, total:0, paid:0, txns:0, lastDate:'' };
+      const b = byBuyer[key];
+      b.qty += s.qty; b.total += s.totalAmount||0; b.paid += s.paidAmount||0; b.txns += 1;
+      if(!b.lastDate || (s.date||'') > b.lastDate) b.lastDate = s.date;
+    });
+    return Object.values(byBuyer).sort((a,b) => b.qty-a.qty).map(b => ({
+      'Buyer': b.name, 'Buyer Type': b.buyerType, 'Class': b.cls, 'Admission No': b.admissionNo,
+      'Total Qty Purchased': b.qty, 'Transactions': b.txns, 'Total Spent': Math.round(b.total*100)/100, 'Total Paid': Math.round(b.paid*100)/100, 'Last Purchase Date': b.lastDate,
+    }));
+  }
+  function invReportNonBuyerRows(){
+    const itemSel = document.getElementById('invReportItemSelect');
+    const itemId = itemSel ? itemSel.value : '';
+    if(!itemId) return [];
+    const buyerIds = new Set(inventorySales.filter(s => s.itemId===itemId && s.buyerType==='Student').map(s => s.studentId));
+    return applyStudentScope(students.filter(isActive), getReportScopeFilters()).filter(s => !buyerIds.has(s.id)).map(s => ({
+      'Admission No': s.admissionNo, 'Name': s.firstName+' '+s.lastName, 'Class': s.className, 'Section': s.section, 'Phone': s.fatherPhone||s.motherPhone||'',
+    }));
+  }
+  function updateInvReportSummary(){
+    const box = document.getElementById('invReportSummary');
+    if(!box) return;
+    const itemSel = document.getElementById('invReportItemSelect');
+    if(!itemSel || !itemSel.value){ box.innerHTML = 'Pick a product above to see purchase stats.'; return; }
+    const sales = invReportFilteredSales();
+    const uniqueStudents = new Set(sales.filter(s=>s.buyerType==='Student').map(s=>s.studentId)).size;
+    const uniqueStaff = new Set(sales.filter(s=>s.buyerType==='Staff').map(s=>s.buyerName||s.soldBy)).size;
+    const walkinCount = sales.filter(s=>s.buyerType==='Walk-in').length;
+    const totalQty = sales.reduce((sum,s)=>sum+(s.qty||0),0);
+    const totalRevenue = sales.reduce((sum,s)=>sum+(s.totalAmount||0),0);
+    const it = inventoryItems.find(x=>x.id===itemSel.value);
+    let parts = [`<b>${uniqueStudents}</b> student${uniqueStudents===1?'':'s'} purchased`];
+    if(uniqueStaff) parts.push(`<b>${uniqueStaff}</b> staff`);
+    if(walkinCount) parts.push(`<b>${walkinCount}</b> walk-in sale${walkinCount===1?'':'s'}`);
+    parts.push(`<b>${totalQty}</b> unit${totalQty===1?'':'s'} sold`);
+    parts.push(`<b>${fmtMoney(totalRevenue)}</b> revenue`);
+    box.innerHTML = `✓ <b>${it?it.name:''}</b>: ` + parts.join(' &nbsp;·&nbsp; ');
+  }
+  function generateInvItemReport(kind, format){
+    const itemSel = document.getElementById('invReportItemSelect');
+    const it = itemSel ? inventoryItems.find(x=>x.id===itemSel.value) : null;
+    if(!it){ showToast('Pick a product first.'); return; }
+    const names = { buyers:'Item Purchase Report — Buyer List', summary:'Item Purchase Summary — Unique Buyers', nonbuyers:'Non-Buyers Report' };
+    const rows = kind==='buyers' ? invReportBuyerListRows() : kind==='summary' ? invReportBuyerSummaryRows() : invReportNonBuyerRows();
+    if(rows.length === 0){ showToast('Nothing to report for this product with the current conditions.'); return; }
+    const title = names[kind] + ' — ' + it.name;
+    const fileBase = (kind+'_'+it.name).replace(/[^\w-]+/g,'_');
+    if(format === 'excel') exportRowsToExcel(fileBase+'.xlsx', names[kind], rows);
     else exportRowsToPDF(title, '', rows);
   }
   function generateLibraryReport(id, format, filtersOverride){
