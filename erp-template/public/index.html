@@ -2947,6 +2947,9 @@
     { key:'reports_teacher_performance', label:'Teacher Performance Reports', icon:'🧑‍🏫', category:'Reports' },
     { key:'reports_inventory',  label:'Inventory / Stock Reports', icon:'📦', category:'Reports', isNew:true },
     { key:'reports_transport',  label:'Transport / Vehicle Reports', icon:'🚌', category:'Reports', isNew:true },
+    { key:'reports_library',    label:'Library Reports', icon:'📚', category:'Reports', isNew:true },
+    { key:'reports_hostel',     label:'Hostel Reports', icon:'🏠', category:'Reports', isNew:true },
+    { key:'reports_admissions', label:'Admissions / Inquiry Reports', icon:'📝', category:'Reports', isNew:true },
     { key:'reports_custom',     label:'Custom Report Builder', icon:'🛠️', category:'Reports' },
 
     { key:'setup',       label:'Initial Setup (legacy)', icon:'⚙️', category:'Configuration', hidden:true },
@@ -9238,6 +9241,9 @@
     TeacherPerformance: { color:'#B8621B', bg:'rgba(184,98,27,0.10)' },
     Inventory:  { color:'#B5533C', bg:'rgba(181,83,60,0.10)' },
     Transport:  { color:'#2E6F9E', bg:'rgba(46,111,158,0.10)' },
+    Library:    { color:'#7A5C3E', bg:'rgba(122,92,62,0.10)' },
+    Hostel:     { color:'#8E5572', bg:'rgba(142,85,114,0.10)' },
+    Admissions: { color:'#2F9C6E', bg:'rgba(47,156,110,0.10)' },
   };
   function applyStudentScope(list, filters){
     let out = list;
@@ -9416,11 +9422,46 @@
       } },
     { id:'tr_unassigned', category:'Transport', name:'Transport Requested but Unassigned', icon:'❓', scopable:'student', desc:'Students who need transport but have no route or stop assigned yet — a gap to fix before billing.',
       getRows(f){ return applyStudentScope(students.filter(s => isActive(s) && s.needsTransport==='Yes' && (!s.transportRouteId || !s.transportStopId)), f).map(s => ({ 'Student':s.firstName+' '+s.lastName, 'Class':s.className, 'Section':s.section, 'Parent Phone':s.fatherPhone||s.motherPhone||'', 'Missing':!s.transportRouteId?'Route':'Stop' })); } },
+
+    // Library
+    { id:'lib_catalog', category:'Library', name:'Book Catalog Report', icon:'📚', scopable:false, desc:'Every book in the library with author, category, shelf location, and copies available.',
+      getRows(){ return libraryBooks.map(b => ({ 'Title':b.title, 'Author':b.author||'', 'Category':b.category||'', 'ISBN':b.isbn||'', 'Publisher':b.publisher||'', 'Shelf Location':b.shelfLocation||'', 'Total Copies':b.totalCopies, 'Available Copies':b.availableCopies })); } },
+    { id:'lib_circulation', category:'Library', name:'Circulation Summary', icon:'🔄', scopable:false, desc:'Every book issued to date, with borrower, issue/due/return dates, and status.',
+      getRows(){ return libraryIssues.slice().sort((a,b) => (b.issueDate||'').localeCompare(a.issueDate||'')).map(i => ({ 'Book':i.bookTitle, 'Borrower':i.borrowerName||'', 'Borrower Type':i.borrowerType||'', 'Issue Date':i.issueDate||'', 'Due Date':i.dueDate||'', 'Return Date':i.returnDate||'—', 'Status':i.status||'', 'Fine':i.fineAmount||0 })); } },
+    { id:'lib_overdue', category:'Library', name:'Overdue Books Report', icon:'⏰', scopable:false, desc:'Books still with a borrower past their due date, with days overdue.',
+      getRows(){ const today = new Date().toISOString().slice(0,10); return libraryIssues.filter(i => i.status==='Issued' && i.dueDate && i.dueDate < today).map(i => { const daysLate = Math.max(0, Math.round((new Date(today) - new Date(i.dueDate)) / 86400000)); return { 'Book':i.bookTitle, 'Borrower':i.borrowerName||'', 'Borrower Type':i.borrowerType||'', 'Issue Date':i.issueDate||'', 'Due Date':i.dueDate||'', 'Days Overdue':daysLate, 'Est. Fine':daysLate*(librarySettings.finePerDay||0) }; }); } },
+    { id:'lib_fine_collection', category:'Library', name:'Fine Collection Report', icon:'💸', scopable:false, desc:'Every returned book that incurred a late fine.',
+      getRows(){ return libraryIssues.filter(i => (i.fineAmount||0) > 0).map(i => ({ 'Book':i.bookTitle, 'Borrower':i.borrowerName||'', 'Borrower Type':i.borrowerType||'', 'Issue Date':i.issueDate||'', 'Return Date':i.returnDate||'', 'Fine Amount':i.fineAmount })); } },
+    { id:'lib_top_borrowed', category:'Library', name:'Most Borrowed Books', icon:'⭐', scopable:false, desc:'Books ranked by how many times they have been issued.',
+      getRows(){ const byBook = {}; libraryIssues.forEach(i => { if(!byBook[i.bookId]) byBook[i.bookId] = { title:i.bookTitle, count:0 }; byBook[i.bookId].count++; }); return Object.values(byBook).sort((a,b) => b.count-a.count).map(r => ({ 'Book':r.title, 'Times Issued':r.count })); } },
+    { id:'lib_low_stock', category:'Library', name:'Books Needing Reorder', icon:'📉', scopable:false, desc:'Titles with zero or very low copies available against total copies held.',
+      getRows(){ return libraryBooks.filter(b => (b.availableCopies||0) <= 0 || (b.totalCopies>0 && (b.availableCopies/b.totalCopies) <= 0.2)).map(b => ({ 'Title':b.title, 'Author':b.author||'', 'Total Copies':b.totalCopies, 'Available Copies':b.availableCopies, 'Status':b.availableCopies<=0?'Out of Copies':'Low Availability' })); } },
+
+    // Hostel
+    { id:'hostel_occupancy', category:'Hostel', name:'Room Occupancy Report', icon:'🏠', scopable:false, desc:'Every hostel room with capacity, current occupants, and vacancy.',
+      getRows(){ return hostelRooms.map(r => { const occ = hostelOccupants(r.id).length; return { 'Block':r.blockName||'', 'Room No':r.roomNumber||'', 'Room Type':r.roomType||'', 'Capacity':r.capacity, 'Occupied':occ, 'Vacant':Math.max(0, r.capacity-occ), 'Warden':r.wardenName||'' }; }); } },
+    { id:'hostel_vacancy', category:'Hostel', name:'Vacant Beds Report', icon:'🛏️', scopable:false, desc:'Rooms with at least one bed still free.',
+      getRows(){ return hostelRooms.map(r => ({ r, occ: hostelOccupants(r.id).length })).filter(x => x.occ < x.r.capacity).map(x => ({ 'Block':x.r.blockName||'', 'Room No':x.r.roomNumber||'', 'Room Type':x.r.roomType||'', 'Capacity':x.r.capacity, 'Occupied':x.occ, 'Vacant Beds':x.r.capacity-x.occ })); } },
+    { id:'hostel_roster', category:'Hostel', name:'Boarder Roster (All Rooms)', icon:'📋', scopable:'student', desc:'Every boarder with their assigned block, room, and room type — filter by class/section above.',
+      getRows(f){ const boarders = applyStudentScope(students.filter(s => isActive(s) && s.isBoarder==='Yes'), f); return boarders.map(s => { const room = hostelRooms.find(r => r.id===s.hostelRoomId); return { 'Student':s.firstName+' '+s.lastName, 'Class':s.className, 'Section':s.section, 'Block':room?room.blockName:'—', 'Room No':room?room.roomNumber:'—', 'Room Type':room?room.roomType:'—' }; }); } },
+    { id:'hostel_fee_collection', category:'Hostel', name:'Hostel Fee Collection Report', icon:'💰', scopable:'student', desc:'Expected, collected, and outstanding hostel fee for every boarder.',
+      getRows(f){ const boarders = applyStudentScope(students.filter(s => isActive(s) && s.isBoarder==='Yes'), f); return boarders.map(s => { const fin = computeStudentFinance(s); const room = hostelRooms.find(r => r.id===s.hostelRoomId); return { 'Student':s.firstName+' '+s.lastName, 'Class':s.className, 'Section':s.section, 'Room':room?(room.blockName+' - '+room.roomNumber):'Unassigned', 'Expected':fin.perCat.hostel.expected, 'Collected':fin.perCat.hostel.collected, 'Due':fin.perCat.hostel.receivable }; }); } },
+    { id:'hostel_warden_directory', category:'Hostel', name:'Block / Warden Directory', icon:'📇', scopable:false, desc:'Warden name and phone number for every hostel block/room.',
+      getRows(){ return hostelRooms.map(r => ({ 'Block':r.blockName||'', 'Room No':r.roomNumber||'', 'Warden Name':r.wardenName||'—', 'Warden Phone':r.wardenPhone||'—' })); } },
+
+    // Admissions / Inquiries
+    { id:'adm_inquiry_log', category:'Admissions', name:'Admission Inquiry Log', icon:'📝', scopable:false, desc:'Every admission inquiry submitted via the school website, most recent first.',
+      getRows(){ return admissionInquiries.slice().sort((a,b) => (b.submittedDate||'').localeCompare(a.submittedDate||'')).map(i => ({ 'Date':i.submittedDate||'', 'Student Name':i.studentName||'', 'Applying For Grade':i.applyingGrade||'', 'Parent Name':i.parentName||'', 'Parent Phone':i.parentPhone||'', 'Parent Email':i.parentEmail||'', 'Status':i.status||'New' })); } },
+    { id:'adm_funnel_summary', category:'Admissions', name:'Admission Funnel Summary', icon:'📊', scopable:false, desc:'Inquiries grouped by status, with overall conversion rate.',
+      getRows(){ const counts = {}; admissionInquiries.forEach(i => { const st = i.status||'New'; counts[st] = (counts[st]||0)+1; }); const total = admissionInquiries.length; const converted = counts['Converted']||0; const rows = Object.keys(counts).map(st => ({ 'Status':st, 'Count':counts[st] })); rows.push({ 'Status':'Total Inquiries', 'Count':total }); rows.push({ 'Status':'Conversion Rate', 'Count': total ? Math.round((converted/total)*10000)/100 + '%' : '0%' }); return rows; } },
+    { id:'adm_grade_wise_demand', category:'Admissions', name:'Grade-wise Demand Report', icon:'🎓', scopable:false, desc:'Inquiry count grouped by the grade/class applied for.',
+      getRows(){ const counts = {}; admissionInquiries.forEach(i => { const g = i.applyingGrade||'Not specified'; counts[g] = (counts[g]||0)+1; }); return Object.keys(counts).map(g => ({ 'Applying For Grade':g, 'Inquiries':counts[g] })); } },
   ];
   const REPORT_CATEGORY_TO_PERM = {
     Academic: 'reports_academic', Attendance: 'reports_attendance', Marks: 'reports_marks',
     Accounts: 'reports_accounts', Employee: 'reports_employee',
     Inventory: 'reports_inventory', Transport: 'reports_transport',
+    Library: 'reports_library', Hostel: 'reports_hostel', Admissions: 'reports_admissions',
   };
   function reportLibraryCategories(){
     const cats = [];
