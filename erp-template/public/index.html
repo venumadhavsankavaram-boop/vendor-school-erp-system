@@ -12214,6 +12214,15 @@
     return inventoryReturns.filter(r => r.saleId === saleId).reduce((s,r) => s + r.qty, 0);
   }
   const INVENTORY_CATEGORIES = ['Student Supplies','Uniforms','Books','Stationery','Sports','Other'];
+  const INVENTORY_SUBCATEGORIES = {
+    'Student Supplies': ['Bag','Water Bottle','Lunch Box','ID Card Holder','Other'],
+    'Uniforms': ['Shirt','Trousers','Skirt','Pinafore','Tie','Belt','Sweater','Shoes','Other'],
+    'Books': ['Textbook','Notebook','Workbook','Guide','Other'],
+    'Stationery': ['Pen','Pencil','Eraser','Geometry Box','Crayons','Other'],
+    'Sports': ['Ball','Kit','Equipment','Other'],
+    'Other': ['Other'],
+  };
+  const INVENTORY_UNITS = ['Piece','Set','Pair','Box','Packet','Kg','Litre','Dozen'];
   let inventoryTab = 'items';
   let invFilterType = 'Sellable';
   let invSearchQuery = '';
@@ -15155,9 +15164,9 @@
           const low = !out && it.quantity <= it.threshold;
           const disabled = it.active === false;
           return `<tr style="${disabled?'opacity:0.5;':''}">
-            <td class="name-cell">${it.name}</td>
+            <td class="name-cell">${it.name}${it.size ? ` <span class="pill" style="font-size:0.6rem;">${it.size}</span>` : ''}</td>
             <td><span class="pill" style="font-size:0.62rem; ${(it.type||'Sellable')==='Sellable'?'background:rgba(24,143,134,0.15); color:#0f6a63;':'background:rgba(203,154,46,0.18); color:#8a6a1f;'}">${it.type||'Sellable'}</span></td>
-            <td>${it.category||'General'}</td>
+            <td>${it.category||'General'}${it.subCategory ? ` <span style="color:var(--ink-soft); font-size:0.75rem;">— ${it.subCategory}</span>` : ''}</td>
             <td style="color:${out?'var(--magenta)':low?'#8a6a1f':'#0f6a63'}; font-weight:700;">${it.quantity}</td>
             <td>${sold}</td>
             <td>${fmtMoney(it.sellingPrice)}</td>
@@ -15247,38 +15256,84 @@
   function renderInventoryItemEditor(body){
     const it = editingInventoryItemId ? inventoryItems.find(x => x.id === editingInventoryItemId) : null;
     const isAdmin = currentUser.role === 'Admin';
+    const selectedCat = it && it.category ? it.category : INVENTORY_CATEGORIES[0];
     body.innerHTML = `
       <div class="breadcrumb"><a onclick="backToInventoryItemsList()">Items</a> &nbsp;/&nbsp; ${it ? it.name : 'New Product'}</div>
-      <div class="profile-card" style="max-width:520px;">
-        ${!isAdmin ? `<div style="background:rgba(203,154,46,0.12); border-left:4px solid var(--gold); border-radius:8px; padding:12px 14px; margin-bottom:16px; font-size:0.82rem;"><b>⚠ Stock changes need Admin approval.</b> Saving this will be sent for review before it takes effect.</div>` : ''}
-        <div class="form-grid">
-          <div class="f-field full"><label>Product Name <span class="required-star">*</span></label><input type="text" id="invItemName" value="${it?it.name:''}" placeholder="e.g. School Uniform — Size M"></div>
+      ${!isAdmin ? `<div class="profile-card" style="max-width:760px; background:rgba(203,154,46,0.12); border-left:4px solid var(--gold); margin-bottom:16px; font-size:0.82rem;"><b>⚠ Stock changes need Admin approval.</b> Saving this will be sent for review before it takes effect.</div>` : ''}
+
+      <div class="profile-card" style="max-width:760px; margin-bottom:20px;">
+        <h4>📦 Basic Information</h4>
+        <div class="form-grid" style="margin-top:12px;">
+          <div class="f-field full"><label>Product Name <span class="required-star">*</span></label><input type="text" id="invItemName" value="${it?it.name:''}" placeholder="Enter product name"></div>
           <div class="f-field"><label>Type <span class="required-star">*</span></label><select id="invItemType"><option value="Sellable" ${(!it||it.type==='Sellable')?'selected':''}>Sellable</option><option value="Non-Sellable" ${it&&it.type==='Non-Sellable'?'selected':''}>Non-Sellable</option></select></div>
-          <div class="f-field"><label>Category</label><select id="invItemCategory">${INVENTORY_CATEGORIES.map(c => `<option ${it&&it.category===c?'selected':''}>${c}</option>`).join('')}</select></div>
-          <div class="f-field"><label>Quantity in Stock <span class="required-star">*</span></label><input type="number" id="invItemQty" value="${it?it.quantity:0}" min="0"></div>
-          <div class="f-field"><label>Stock Threshold</label><input type="number" id="invItemThreshold" value="${it?it.threshold:5}" min="0"></div>
-          <div class="f-field"><label>Cost Price (₹) <span class="required-star">*</span></label><input type="number" id="invItemCost" value="${it?it.costPrice:''}" min="0"></div>
-          <div class="f-field"><label>Selling Price (₹) <span class="required-star">*</span></label><input type="number" id="invItemSelling" value="${it?it.sellingPrice:''}" min="0"></div>
-        </div>
-        ${!isAdmin ? `<div class="f-field full" style="margin-top:10px;"><label>Explanation for Admin <span class="required-star">*</span></label><textarea id="invItemExplanation" rows="2" placeholder="Why is this stock change needed?"></textarea></div>` : ''}
-        <div style="display:flex; gap:10px; margin-top:16px;">
-          <button class="btn btn-ghost" onclick="backToInventoryItemsList()">Cancel</button>
-          <button class="btn btn-primary" onclick="saveInventoryItem()">${isAdmin ? 'Save Product' : 'Submit for Approval'}</button>
+          <div class="f-field"><label>Category <span class="required-star">*</span></label><select id="invItemCategory" onchange="onInvCategoryChange()">${INVENTORY_CATEGORIES.map(c => `<option ${selectedCat===c?'selected':''}>${c}</option>`).join('')}</select></div>
+          <div class="f-field"><label>Sub-Category</label><select id="invItemSubCategory">${invSubCategoryOptions(selectedCat, it?it.subCategory:'')}</select></div>
         </div>
       </div>
+
+      <div class="profile-card" style="max-width:760px; margin-bottom:20px;">
+        <h4>💰 Pricing &amp; Stock</h4>
+        <div class="form-grid" style="margin-top:12px;">
+          <div class="f-field"><label>Cost Price (₹) / per unit <span class="required-star">*</span></label><input type="number" id="invItemCost" value="${it?it.costPrice:''}" min="0" step="0.01" placeholder="0.00"></div>
+          <div class="f-field"><label>Selling Price (₹) / per unit <span class="required-star">*</span></label><input type="number" id="invItemSelling" value="${it?it.sellingPrice:''}" min="0" step="0.01" placeholder="0.00"></div>
+          <div class="f-field"><label>Current Stock <span class="required-star">*</span></label><input type="number" id="invItemQty" value="${it?it.quantity:''}" min="0" placeholder="0"></div>
+          <div class="f-field"><label>Minimum Stock (low-stock threshold)</label><input type="number" id="invItemThreshold" value="${it?it.threshold:5}" min="0"></div>
+          <div class="f-field"><label>Unit <span class="required-star">*</span></label><select id="invItemUnit">${INVENTORY_UNITS.map(u => `<option ${it&&it.unit===u?'selected':(!it&&u==='Piece')?'selected':''}>${u}</option>`).join('')}</select></div>
+          <div class="f-field">
+            <label>Size</label>
+            <input type="text" id="invItemSize" value="${it&&it.size?it.size:''}" placeholder="e.g. S, M, L, XL (optional)">
+            <p style="font-size:0.72rem; color:var(--ink-soft); margin:4px 0 0;">Optional — for uniforms etc.</p>
+          </div>
+        </div>
+      </div>
+
+      <div class="profile-card" style="max-width:760px; margin-bottom:20px;">
+        <h4>🏷️ Tax &amp; Other Details</h4>
+        <div class="form-grid" style="margin-top:12px;">
+          <div class="f-field"><label>Applicable Class</label><input type="text" id="invItemClass" value="${it&&it.applicableClass?it.applicableClass:''}" placeholder="e.g. Class 5"></div>
+          <div class="f-field"><label>Tax Rate (GST %)</label><input type="number" id="invItemTaxRate" value="${it&&it.taxRate!==undefined?it.taxRate:0}" min="0" max="100" step="0.01"></div>
+          <div class="f-field full"><label>HSN Code</label><input type="text" id="invItemHsn" value="${it&&it.hsnCode?it.hsnCode:''}" placeholder="HSN code for GST (optional)"></div>
+          <div class="f-field full"><label>Description</label><textarea id="invItemDescription" rows="3" placeholder="Enter product description (optional)">${it&&it.description?it.description:''}</textarea></div>
+        </div>
+      </div>
+
+      ${!isAdmin ? `<div class="profile-card" style="max-width:760px; margin-bottom:20px;"><div class="f-field full"><label>Explanation for Admin <span class="required-star">*</span></label><textarea id="invItemExplanation" rows="2" placeholder="Why is this stock change needed?"></textarea></div></div>` : ''}
+
+      <div style="display:flex; gap:10px; max-width:760px; justify-content:flex-end;">
+        <button class="btn btn-ghost" onclick="backToInventoryItemsList()">Cancel</button>
+        <button class="btn btn-primary" onclick="saveInventoryItem()">${isAdmin ? (it ? 'Save Product' : '📦 Add Product') : 'Submit for Approval'}</button>
+      </div>
     `;
+  }
+  function invSubCategoryOptions(category, selected){
+    const opts = INVENTORY_SUBCATEGORIES[category] || INVENTORY_SUBCATEGORIES['Other'];
+    return `<option value="">Select sub-category</option>` + opts.map(s => `<option ${selected===s?'selected':''}>${s}</option>`).join('');
+  }
+  function onInvCategoryChange(){
+    const cat = document.getElementById('invItemCategory').value;
+    document.getElementById('invItemSubCategory').innerHTML = invSubCategoryOptions(cat, '');
   }
   async function saveInventoryItem(){
     const name = document.getElementById('invItemName').value.trim();
     const type = document.getElementById('invItemType').value;
     const category = document.getElementById('invItemCategory').value;
+    const subCategory = document.getElementById('invItemSubCategory').value;
     const quantity = Number(document.getElementById('invItemQty').value) || 0;
     const threshold = Number(document.getElementById('invItemThreshold').value) || 0;
     const costPrice = Number(document.getElementById('invItemCost').value) || 0;
     const sellingPrice = Number(document.getElementById('invItemSelling').value) || 0;
+    const unit = document.getElementById('invItemUnit').value;
+    const size = document.getElementById('invItemSize').value.trim();
+    const applicableClass = document.getElementById('invItemClass').value.trim();
+    const taxRate = Number(document.getElementById('invItemTaxRate').value) || 0;
+    const hsnCode = document.getElementById('invItemHsn').value.trim();
+    const description = document.getElementById('invItemDescription').value.trim();
     if(!name){ showToast('Enter a product name.'); return; }
     if(costPrice <= 0 || sellingPrice <= 0){ showToast('Enter both a cost price and a selling price.'); return; }
-    const payload = { editingId: editingInventoryItemId, name, type, category, quantity, threshold, costPrice, sellingPrice };
+    const payload = {
+      editingId: editingInventoryItemId, name, type, category, subCategory, quantity, threshold, costPrice, sellingPrice,
+      unit, size, applicableClass, taxRate, hsnCode, description,
+    };
     const isAdmin = currentUser.role === 'Admin';
     if(!isAdmin){
       const explanation = document.getElementById('invItemExplanation').value.trim();
@@ -15298,11 +15353,16 @@
     backToInventoryItemsList();
   }
   async function applyInventoryItemSave(p){
+    const fields = {
+      name:p.name, type:p.type, category:p.category, subCategory:p.subCategory||'', quantity:p.quantity, threshold:p.threshold,
+      costPrice:p.costPrice, sellingPrice:p.sellingPrice, unit:p.unit||'Piece', size:p.size||'',
+      applicableClass:p.applicableClass||'', taxRate:p.taxRate||0, hsnCode:p.hsnCode||'', description:p.description||'',
+    };
     if(p.editingId){
       const idx = inventoryItems.findIndex(x => x.id === p.editingId);
-      if(idx > -1) inventoryItems[idx] = { ...inventoryItems[idx], name:p.name, type:p.type, category:p.category, quantity:p.quantity, threshold:p.threshold, costPrice:p.costPrice, sellingPrice:p.sellingPrice };
+      if(idx > -1) inventoryItems[idx] = { ...inventoryItems[idx], ...fields };
     }else{
-      inventoryItems.push({ id:'item_'+Date.now(), name:p.name, type:p.type, category:p.category, quantity:p.quantity, threshold:p.threshold, costPrice:p.costPrice, sellingPrice:p.sellingPrice, active:true, createdBy:currentUser.name });
+      inventoryItems.push({ id:'item_'+Date.now(), ...fields, active:true, createdBy:currentUser.name });
     }
     await storageSet(INVENTORY_ITEMS_KEY, inventoryItems);
     renderInventoryBody();
