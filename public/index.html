@@ -50,6 +50,17 @@
     --cream:#FFFBF3; --ink:#1A1530; --ink-soft:#544C6B; --white:#FFFFFF;
     --border:rgba(33,26,78,0.12);
     --shadow: 0 20px 50px -24px rgba(22,16,51,0.25);
+    --shadow-hover: 0 26px 54px -20px rgba(22,16,51,0.32);
+    /* ===== SEMANTIC STATUS COLOURS =====
+       Fixed meaning, distinct from per-school brand colours above — never
+       re-themed. These formalise colours the app already used ad-hoc
+       (teal=success, gold=warning, magenta=danger) plus a new neutral
+       --info for "new/draft/informational" states, so status pills read
+       correctly in dark mode too (see statusPill()/syllabusStatusPill()). */
+    --success:var(--teal); --success-bg:rgba(24,143,134,0.15); --success-ink:#0f6a63;
+    --warning:var(--gold); --warning-bg:rgba(203,154,46,0.16); --warning-ink:#8a6a1f;
+    --danger:var(--magenta); --danger-bg:rgba(209,16,115,0.13); --danger-ink:var(--magenta);
+    --info:#2F80ED; --info-bg:rgba(47,128,237,0.13); --info-ink:#1c5cbd;
     /* ===== PER-SCHOOL BRANDING =====
        These four are the one thing in this file meant to be edited per
        school, same idea as WEBSITE_ORIGIN in server.js. Set them to the
@@ -77,6 +88,11 @@
     --cream:#15121F; --ink:#EDEAF5; --ink-soft:#B0A9C7; --white:#211C34;
     --border:rgba(237,234,245,0.12);
     --shadow: 0 20px 50px -24px rgba(0,0,0,0.6);
+    --shadow-hover: 0 26px 54px -20px rgba(0,0,0,0.7);
+    --success:var(--teal); --success-bg:rgba(59,194,181,0.18); --success-ink:#3BC2B5;
+    --warning:var(--gold); --warning-bg:rgba(232,200,116,0.2); --warning-ink:#E8C874;
+    --danger:var(--magenta); --danger-bg:rgba(236,68,152,0.18); --danger-ink:#EC4498;
+    --info:#5B9BF2; --info-bg:rgba(91,155,242,0.18); --info-ink:#8FB8F5;
     --login-accent:#C9C2F0;
     --login-accent-deep:#100C29;
     --login-accent-soft:#CB9A2E;
@@ -89,7 +105,7 @@
   [data-theme="dark"] .toast{ background:var(--brand-navy-deep); color:#fff; }
   *{box-sizing:border-box; margin:0; padding:0;}
   body{font-family:'Poppins',sans-serif; background:var(--cream); color:var(--ink); min-height:100vh;}
-  h1,h2,h3{font-family:'Baloo 2',cursive; color:var(--navy);}
+  h1,h2,h3{font-family:'Baloo 2',cursive; color:var(--navy); letter-spacing:-0.01em;}
   button{font-family:'Poppins',sans-serif; cursor:pointer;}
 
   /* ===== APP SHELL ===== */
@@ -218,7 +234,9 @@
   .stat-card{
     background:var(--white); border-radius:16px; padding:20px 22px; box-shadow:var(--shadow);
     border-left:4px solid var(--gold);
+    transition:transform 0.2s cubic-bezier(.4,0,.2,1), box-shadow 0.2s ease;
   }
+  .stat-card:hover{ transform:translateY(-3px); box-shadow:var(--shadow-hover); }
   .stat-card:nth-child(2){border-left-color:var(--magenta);}
   .stat-card:nth-child(3){border-left-color:var(--teal);}
   .stat-card:nth-child(4){border-left-color:var(--navy);}
@@ -238,6 +256,19 @@
   }
   .input:focus, select:focus{border-color:var(--teal); box-shadow:0 0 0 3px rgba(24,143,134,0.15);}
   .input{min-width:220px; flex:1; max-width:320px;}
+  /* Custom dropdown chevron — top-tier ERPs/SaaS style their <select> arrow
+     instead of leaving the OS default; single rule covers every dropdown
+     app-wide. Excludes [multiple] (native list box, no single chevron) and
+     is skipped by an inline "appearance" already set elsewhere, if any. */
+  select:not([multiple]){
+    appearance:none; -webkit-appearance:none; -moz-appearance:none;
+    background-image:url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='10' height='6' viewBox='0 0 10 6'%3E%3Cpath d='M1 1l4 4 4-4' stroke='%23544C6B' stroke-width='1.6' fill='none' stroke-linecap='round' stroke-linejoin='round'/%3E%3C/svg%3E");
+    background-repeat:no-repeat; background-position:right 14px center; background-size:10px 6px;
+    padding-right:34px; cursor:pointer;
+  }
+  [data-theme="dark"] select:not([multiple]){
+    background-image:url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='10' height='6' viewBox='0 0 10 6'%3E%3Cpath d='M1 1l4 4 4-4' stroke='%23B0A9C7' stroke-width='1.6' fill='none' stroke-linecap='round' stroke-linejoin='round'/%3E%3C/svg%3E");
+  }
   .btn{
     padding:11px 21px; border-radius:10px; border:none; font-weight:600; font-size:0.9rem;
     display:inline-flex; align-items:center; gap:6px; white-space:nowrap; cursor:pointer;
@@ -656,7 +687,8 @@
   .profile-head .p-meta{font-size:0.85rem; color:var(--ink-soft);}
   .profile-actions{margin-left:auto; display:flex; gap:10px;}
   .profile-grid{display:grid; grid-template-columns:repeat(auto-fit,minmax(260px,1fr)); gap:16px;}
-  .profile-card{background:var(--white); border-radius:16px; padding:20px 22px; box-shadow:var(--shadow-sm,var(--shadow));}
+  .profile-card{background:var(--white); border-radius:16px; padding:20px 22px; box-shadow:var(--shadow-sm,var(--shadow)); transition:box-shadow 0.2s ease;}
+  .profile-card:hover{box-shadow:var(--shadow-hover);}
   .profile-card h4{font-size:0.9rem; color:var(--navy); margin-bottom:12px;}
   .profile-row{display:flex; justify-content:space-between; font-size:0.82rem; padding:5px 0; border-bottom:1px dashed var(--border); gap:10px;}
   .profile-row:last-child{border-bottom:none;}
@@ -5203,9 +5235,20 @@
   let discSearchDebounce = null;
 
   function statusPill(st){
-    return st==='Approved' ? `<span class="pill" style="background:rgba(24,143,134,0.15); color:#0f6a63;">Approved</span>`
-      : st==='Rejected' ? `<span class="pill" style="background:rgba(209,16,115,0.13); color:var(--magenta);">Rejected</span>`
-      : `<span class="pill" style="background:rgba(203,154,46,0.18); color:#8a6a1f;">Pending</span>`;
+    return st==='Approved' ? `<span class="pill" style="background:var(--success-bg); color:var(--success-ink);">Approved</span>`
+      : st==='Rejected' ? `<span class="pill" style="background:var(--danger-bg); color:var(--danger-ink);">Rejected</span>`
+      : `<span class="pill" style="background:var(--warning-bg); color:var(--warning-ink);">Pending</span>`;
+  }
+  // Generic semantic-status pill for new call sites — reuses the same
+  // success/warning/danger/info tokens as statusPill()/syllabusStatusPill()
+  // above (dark-mode aware, distinct from per-school brand colours).
+  // tone: 'success' | 'warning' | 'danger' | 'info' | 'neutral'
+  function pillTone(tone, label){
+    const bg = tone==='success' ? 'var(--success-bg)' : tone==='warning' ? 'var(--warning-bg)'
+      : tone==='danger' ? 'var(--danger-bg)' : tone==='info' ? 'var(--info-bg)' : 'rgba(0,0,0,0.06)';
+    const ink = tone==='success' ? 'var(--success-ink)' : tone==='warning' ? 'var(--warning-ink)'
+      : tone==='danger' ? 'var(--danger-ink)' : tone==='info' ? 'var(--info-ink)' : 'var(--ink-soft)';
+    return `<span class="pill" style="background:${bg}; color:${ink};">${label}</span>`;
   }
 
   function groupedDiscountRows(){
@@ -15687,8 +15730,8 @@
     `;
   }
   function syllabusStatusPill(status){
-    const color = status==='Completed' ? '#0f6a63' : status==='In Progress' ? '#8a6a1f' : 'var(--ink-soft)';
-    const bg = status==='Completed' ? 'rgba(24,143,134,0.15)' : status==='In Progress' ? 'rgba(203,154,46,0.15)' : 'rgba(0,0,0,0.06)';
+    const color = status==='Completed' ? 'var(--success-ink)' : status==='In Progress' ? 'var(--warning-ink)' : 'var(--ink-soft)';
+    const bg = status==='Completed' ? 'var(--success-bg)' : status==='In Progress' ? 'var(--warning-bg)' : 'rgba(0,0,0,0.06)';
     return `<span class="pill" style="background:${bg}; color:${color};">${status||'Not Started'}</span>`;
   }
   function renderSyllabusTrackerTab(body){
